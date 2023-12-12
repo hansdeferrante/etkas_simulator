@@ -425,6 +425,10 @@ class Patient:
             kidney_program if isinstance(kidney_program, str) else mr.ETKAS
         )
 
+        # Tracking EMA points
+        self._previous_ema_matchpoints: Optional[float] = None
+        self._ema_alpha: float = 0.2
+
         # Items we want to store, for rapid access through functions and properties
         self._needed_match_info = None
         self._offer_inherit_cols = None
@@ -917,6 +921,32 @@ class Patient:
         else:
             self.hu_since = np.nan
 
+    def track_match_points(self, points: float):
+        """Function to track match points with exponential moving average.
+            Does not really help.
+        """
+        if self._previous_ema_matchpoints is None:
+            self._previous_ema_matchpoints = points
+        else:
+            self._previous_ema_matchpoints = (
+                (1-self._ema_alpha) * self._previous_ema_matchpoints + self._ema_alpha * points
+            )
+
+    def retrieve_ema_match_points(self) -> float:
+        # If an exponential average of match points is available, return it
+        if self._previous_ema_matchpoints:
+            return self._previous_ema_matchpoints
+
+        # Otherwise, return waiting points at listing
+        if self.get_dial_start_time():
+            if (dial_time_listing := self.get_dial_start_time() - self.listing_offset) > 0:
+                waitpoints =  (dial_time_listing + self.__dict__[cn.PREVIOUS_WT])
+            else:
+                waitpoints = self.__dict__[cn.PREVIOUS_WT]
+        else:
+            waitpoints = self.__dict__[cn.PREVIOUS_WT]
+        return waitpoints * self.sim_set.POINTS_ALLOCATION.get('YEARS_ON_DIAL')
+
     @property
     def am(self):
         if self._am is None:
@@ -1299,6 +1329,10 @@ class HLASystem:
 
 
     def _determine_split_mismatches(self, d: Donor, p: Patient, loci: Optional[Set[str]] = None):
+        """Determine mismatches at the split level.
+
+        This function falls back to matching at the broad level, if splits are unknown.
+        """
         if loci is None:
             loci = d.hla_splits.keys()
         mm = {

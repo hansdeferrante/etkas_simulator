@@ -301,7 +301,6 @@ class MatchList:
 
     _ids = count(0)
 
-    @profile
     def __init__(
             self, patients: Generator[Patient, None, None], donor: Donor,
             match_date: datetime,

@@ -40,7 +40,6 @@ class MatchRecordCurrentETKAS(MatchRecord):
 
     et_comp_thresh = None
 
-    @profile
     def __init__(
             self,
             patient: Patient,
@@ -103,15 +102,20 @@ class MatchRecordCurrentETKAS(MatchRecord):
             self.add_balance_points(bal_system=bal_system)
 
             # Calculate match points (as well as components if necessary)
-            self.total_match_points = calc_points.calc_score(
-                self.__dict__
-            )
             if self.store_score_components:
                 self.sc = calc_points.calc_score_components(
                     self.__dict__
                 )
+                self.total_match_points = sum(
+                    self.sc.values()
+                )
             else:
+                self.total_match_points = calc_points.calc_score(
+                    self.__dict__
+                )
                 self.sc = None
+            #if self.total_match_points and self.total_match_points > 0:
+            #    self.patient.track_match_points(self.total_match_points)
 
         else:
             self.__dict__[cn.MTCH_TIER]='B'

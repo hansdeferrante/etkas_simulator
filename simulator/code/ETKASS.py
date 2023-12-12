@@ -83,14 +83,12 @@ class ActiveList:
 
     def resort_lists(self):
         for bg, active_list in self._active_lists.items():
-
             # Sort dictionary by patient (i.e. match MELD)
             self._active_lists[bg] = dict(
                 sorted(
                     active_list.items(),
-                    key = lambda x: (
-                        x[1].__dict__[cn.DATE_FIRST_DIAL] or datetime.now()
-                    )
+                    key = lambda x: (x[1].get_dial_start_time() if x[1].get_dial_start_time() is not None else 0),
+                    reverse=True
                 )
             )
 
@@ -127,10 +125,10 @@ class ETKASS:
         self.hla_system = HLASystem(sim_set)
         self.bal_system = load_balances(sim_set)
 
-        # Set up times, and resort list every 30 days
+        # Set up times, and resort list every 14 days
         self.sim_time = 0
         self._time_active_list_resorted = 0
-        self._resort_every_k_days = 30
+        self._resort_every_k_days = 14
 
         # Keep track of number of obligations generated
         self.n_obligations = 0

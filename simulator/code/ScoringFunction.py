@@ -76,11 +76,12 @@ class MatchPointFunction:
         self.round=round
         self.points_comp_to_group = points_comp_to_group
 
-    def add_interactions(self, d: Dict[str, any]) -> Dict[str, any]:
+    def add_interactions(self, d: Dict[str, Any]) -> None:
         d[cn.INTERCEPT] = 1
         for inter in self.interactions:
             var1, var2 = inter.split(':')
             d[inter] = d[var1] * d[var2]
+
 
     def calc_score(
             self,
@@ -90,13 +91,16 @@ class MatchPointFunction:
 
         self.add_interactions(match_record)
 
-        # Calculate score
-        score = 0
-        for k, coef in self.coef.items():
-            score += match_record[k] * coef
+        # Calculate score. This is faster with a for-loop than
+        # list comprehension.
+        score=0
+        for key, coef in self.coef.items():
+            if (value := match_record[key]) > 0:
+                score += value*coef
 
         if self.round:
             return round_to_int(score)
+
         return score
 
 
