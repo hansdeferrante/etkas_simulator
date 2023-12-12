@@ -1,0 +1,263 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Feb  2 17:33:44 2022
+
+Magic values for the simulator
+
+@author: H.C. de Ferrante
+"""
+
+import simulator.magic_values.column_names as cn
+import simulator.magic_values.etkass_settings as es
+
+DEFAULT_DATE_FORMAT = '%Y-%m-%d'
+DEFAULT_DMY_HMS_FORMAT = '%d-%m-%Y %H:%M:%S'
+
+
+
+DTYPE_TRANSPLANTLIST = {
+    cn.DON_CENTER: 'object',
+    cn.DON_COUNTRY: 'object',
+    cn.N_PREVIOUS_TRANSPLANTS: 'Int64',
+    cn.TIME_REGISTRATION: 'object',
+    cn.DATE_TXP: 'object',
+    cn.WDDR_D_TYPE: 'object',
+    cn.DONOR_LIVING: 'float64',
+    cn.GRAFT_DCD: 'Int64',
+    cn.ALLOC_RANK_FILTERED: 'float64',
+    cn.TOTAL_MATCH_POINTS: 'float64',
+    cn.POINTS_HLA: 'float64',
+    cn.MATCH_COMMENT: 'object',
+    cn.RECIPIENT_CENTER: 'object',
+    cn.RECIPIENT_COUNTRY: 'object',
+    cn.WFMR_R_AGE: 'Int64',
+    cn.R_DOB: 'object',
+    cn.R_WEIGHT: 'float64',
+    cn.R_HEIGHT: 'float64',
+    cn.D_HEIGHT: 'Int64',
+    cn.MATCH_QUALITY: 'object',
+    cn.CURRENT_PATIENT_HLA: 'object',
+    cn.PATIENT_HLA: 'str',
+    cn.DONOR_HLA: 'object',
+    cn.D_HLA_A1: 'object',
+    cn.D_HLA_A2: 'object',
+    cn.D_HLA_B1: 'object',
+    cn.D_HLA_B2: 'object',
+    cn.D_HLA_DRB1: 'object',
+    cn.D_HLA_DRB2: 'object',
+    cn.D_HLA_DRS1: 'object',
+    cn.D_HLA_DRS2: 'object',
+    cn.DATE_FIRST_DIAL: 'object',
+    cn.TYPE_DIALYSIS_FORMATTED: 'object',
+    cn.YEARS_ON_DIAL: 'float64',
+    cn.URG_AT_TXP: 'str',
+    cn.MATCH_QUALITY_MAN: 'str'
+}
+
+DTYPE_OFFERLIST = {
+    cn.RECIPIENT_OFFERED: 'Int64',
+    cn.PATIENT_DOB: 'object',
+    cn.ID_MTR: 'Int64',
+    cn.ID_DONOR: 'Int64',
+    cn.WFTS_MATCH_DATE: 'object',
+    cn.ID_TXP: 'Int64',
+    cn.D_DCD: 'Int64',
+    cn.D_WEIGHT: 'float64',
+    cn.D_BLOODGROUP: 'object',
+    cn.GRAFT_AGE: 'Int64',
+    cn.GRAFT_BLOODGROUP: 'object',
+    cn.TYPE_OFFER: 'Int64',
+    cn.DONOR_COUNTRY: 'object',
+    cn.DONOR_REGION: 'object',
+    cn.DONOR_CENTER: 'object',
+    cn.D_REGION: 'object',
+    cn.D_ALLOC_CENTER: 'object',
+    cn.R_MATCH_AGE: 'float64',
+    cn.MATCH_CRITERIUM: 'object',
+    cn.PATIENT_URGENCY: 'object',
+    cn.R_BLOODGROUP: 'object',
+    cn.REC_REQ: 'object',
+    cn.REQ_INT: 'Int64',
+    cn.PATIENT_COUNTRY: 'object',
+    cn.PATIENT_REGION: 'object',
+    cn.PATIENT_CENTER: 'object',
+    cn.RECIPIENT_REGION: 'object',
+    cn.R_WEIGHT: 'float64',
+    cn.R_HEIGHT: 'float64',
+    cn.RNK_OTHER: 'Int64',
+    cn.RNK_ACCEPTED: 'Int64',
+    cn.ACCEPTED: bool,
+    cn.ACTION_CODE: 'object',
+    cn.ACTION_CODE_DESC: 'object',
+    cn.FINAL_REC_URG_AT_TRANSPLANT: 'object',
+    cn.MATCH_COMMENT: 'object',
+    cn.TYPE_TRANSPLANTED: 'str',
+    cn.PATIENT_HLA_LITERAL: 'str',
+    cn.D_HLA_FULL: 'str',
+    cn.POINTS_WAIT: 'float64',
+    cn.POINTS_DIST: 'Int64',
+    cn.POINTS_PED: 'Int64',
+    cn.POINTS_BALANCE_NAT: 'Int64',
+    cn.POINTS_BALANCE_REG: 'float64',
+    cn.POINTS_DIST: 'Int64',
+    cn.POINTS_HU: 'Int64',
+    cn.POINTS_MMP: 'float64',
+    cn.POINTS_MMP_SPLIT: 'float64',
+    cn.TOTAL_MATCH_POINTS: 'float64',
+    cn.UNACC_ANT: 'str'
+}
+
+
+DTYPE_PATIENTLIST = {
+    cn.ID_RECIPIENT: int,
+    cn.ID_REGISTRATION: int,
+    cn.TIME_REGISTRATION: 'object',
+    cn.TIME_TO_DEREG: 'float64',
+    cn.TIME_SINCE_PREV_TXP: 'Int64',
+    cn.PREV_TXP_LIVING: 'Int64',
+    cn.PREV_TXP_PED: 'Int64',
+    cn.KTH_REG: int,
+    cn.NTH_TRANSPLANT: int,
+    cn.RECIPIENT_COUNTRY: str,
+    cn.RECIPIENT_CENTER: str,
+    cn.RECIPIENT_REGION: str,
+    cn.R_BLOODGROUP: str,
+    cn.R_WEIGHT: float,
+    cn.R_HEIGHT: float,
+    cn.R_DOB: 'object',
+    cn.PATIENT_SEX: str,
+    cn.R_AGE_LISTING: float,
+    cn.PATIENT_HLA: str,
+    cn.PREVIOUS_T: 'Int64',
+    cn.KIDNEY_PROGRAM: str
+}
+
+DTYPE_DONORLIST = {
+    cn.D_DATE: object,
+    cn.ID_DONOR: int,
+    # cn.KTH_OFFER: int,
+    # cn.TYPE_OFFER: str,
+    # cn.TYPE_OFFER_DETAILED: int,
+    cn.D_COUNTRY: str,
+    cn.D_CENTER: str,
+    cn.D_REGION: str,
+    cn.D_AGE: int,
+    # cn.D_WEIGHT: float,
+    cn.D_BLOODGROUP: str,
+    cn.D_HBSAG: 'Int64',
+    cn.D_HCVAB: 'Int64',
+    cn.D_HBCAB: 'Int64',
+    cn.D_SEPSIS: 'Int64',
+    cn.D_MENINGITIS: 'Int64',
+    cn.D_MALIGNANCY: 'Int64',
+    cn.D_DRUG_ABUSE: 'Int64',
+    cn.D_MARGINAL: 'Int64',
+    cn.D_DCD: 'Int64',
+    cn.D_EUTHANASIA: 'Int64',
+    cn.DONOR_HLA: 'str',
+    cn.DONOR_DEATH_CAUSE_GROUP: str,
+    cn.D_TUMOR_HISTORY: 'Int64',
+    cn.D_MARGINAL_FREE_TEXT: 'Int64',
+    cn.D_SEX: str,
+    cn.D_SMOKING: 'Int64',
+    #cn.D_ALCOHOL_ABUSE: 'Int64',
+    cn.D_DIABETES: 'Int64'
+}
+
+
+DTYPE_DONORBALLIST = {
+    cn.D_DATE: object,
+    cn.D_COUNTRY: str,
+    cn.D_ALLOC_CENTER: str,
+    cn.D_AGE: int,
+    cn.D_BLOODGROUP: str,
+    cn.RECIPIENT_CENTER: str,
+    cn.RECIPIENT_COUNTRY: str
+}
+
+
+DTYPE_DONOR_FILL_NAS = {
+    cn.D_HBSAG: 0,
+    cn.D_HCVAB: 0,
+    cn.D_HBCAB: 0,
+    cn.D_SEPSIS: 0,
+    cn.D_MENINGITIS: 0,
+    cn.D_MALIGNANCY: 0,
+    cn.D_DRUG_ABUSE: 0,
+    cn.D_MARGINAL: 0,
+    cn.D_DCD: 0,
+    cn.D_EUTHANASIA: 0,
+    cn.D_RESCUE: 0,
+    cn.D_DIABETES: 0
+}
+
+
+DTYPE_ACOS = {
+    cn.ID_REGISTRATION: int,
+    cn.TSTART: float
+}
+
+
+DTYPE_DIAGS = {
+    cn.ID_REGISTRATION: int,
+    cn.TSTART: float,
+    cn.DISEASE_GROUP: str
+}
+
+
+DTYPE_PROFILES = {
+    cn.ID_REGISTRATION: int,
+    cn.TSTART: float,
+    cn.PROFILE_MIN_DONOR_AGE: int,
+    cn.PROFILE_MAX_DONOR_AGE: int,
+    cn.PROFILE_DCD: bool,
+    cn.PROFILE_HBSAG: bool,
+    cn.PROFILE_HCVAB: bool,
+    cn.PROFILE_HBCAB: bool,
+    cn.PROFILE_SEPSIS: bool,
+    cn.PROFILE_MENINGITIS: bool,
+    cn.PROFILE_MALIGNANCY: bool,
+    cn.PROFILE_DRUG_ABUSE: bool,
+    cn.PROFILE_RESCUE: bool,
+    cn.PROFILE_EUTHANASIA: bool
+}
+DTYPE_PROFILES.update(
+    {
+        v: int for v in es.PROFILE_HLA_MQS.values()
+    }
+)
+
+DTYPE_STATUSUPDATES = {
+    cn.ID_REGISTRATION: int,
+    cn.TSTART: float,
+    cn.TYPE_UPDATE: 'category',
+    cn.STATUS_VALUE: str,
+    cn.STATUS_DETAIL: str,
+    cn.STATUS_DETAIL2: str,
+    cn.LISTING_DATE: object,
+    cn.REMOVAL_REASON: str,
+    cn.URGENCY_CODE: 'category'
+}
+
+
+
+DTYPE_DONORLIST = {
+    k: v for
+    k, v in DTYPE_DONORLIST.items()
+    }
+
+DTYPE_OFFERLIST = {
+    k.upper(): v for
+    k, v in DTYPE_OFFERLIST.items()
+    }
+
+DTYPE_ACOS = {
+    k.upper(): v for
+    k, v in DTYPE_ACOS.items()
+    }
+
+DTYPE_PROFILES = {
+    k.upper(): v for
+    k, v in DTYPE_PROFILES.items()
+    }
