@@ -50,6 +50,10 @@ def _read_with_datetime_cols(
         dtps = {k.upper(): v for k, v in dtps.items()}
         if datecols:
             datecols = [c.upper() for c in datecols]
+    else:
+        usecols = [c.lower() for c in usecols]
+        dtps = {k.lower(): v for k, v in dtps.items()}
+
 
     data_ = pd.read_csv(
         input_path,
@@ -61,6 +65,12 @@ def _read_with_datetime_cols(
     )
     assert isinstance(data_, pd.DataFrame), \
         f'Expected DataFrame, not {type(data_)}'
+
+    if (missing_cols := set(data_.columns).difference(set(dtps.keys()))):
+        print(
+            f'Warning, following data types not specified for {input_path}:\n'
+            f'{missing_cols}'
+        )
 
     # Read in as standard datetime object, not pd.Timestamp
     if datecols:
@@ -91,7 +101,8 @@ def fix_hla_string(str_col: pd.Series) -> pd.Series:
         to_replace = {
             '(?<=\\s)RB': 'DRB',
             '(?<=\\s)QB': 'DQB',
-            'CW(?=([A-Z]|[0-9]){4})': 'C'
+            'CW(?=([A-Z]|[0-9]){4})': 'C',
+            '/[0-9]+': ''
         },
         regex=True
         )
@@ -164,6 +175,11 @@ def read_offerlist(input_path: str, usecols=None, **kwargs) -> pd.DataFrame:
     )
 
     d_o[cn.PATIENT_URGENCY] = d_o[cn.PATIENT_URGENCY].str.replace(r'_.+', '', regex=True)
+    d_o.loc[:, cn.PATIENT_HLA_LITERAL] = (
+        fix_hla_string(
+            d_o.loc[:, cn.PATIENT_HLA_LITERAL]
+        )
+    )
 
     d_o = d_o.drop_duplicates()
     d_o.columns = d_o.columns.str.lower()
@@ -188,7 +204,7 @@ def read_patients(
     """"Read in patient file."""
 
     if datecols is None:
-        datecols = [cn.TIME_REGISTRATION, cn.R_DOB]
+        datecols = [cn.TIME_REGISTRATION, cn.R_DOB, cn.DATE_FIRST_DIAL]
     if usecols is None:
         usecols = list(dtypes.DTYPE_PATIENTLIST.keys())
 
@@ -230,17 +246,22 @@ def read_rescue_probs(
         input_path,
         delimiter=','
     )
-    rescue_probs = {
-        n: x.iloc[:, 0:2] for n, x in rescue_probs.groupby('strata')
+    if 'strata' in rescue_probs.columns:
+        rescue_probs = {
+            n: x.iloc[:, 0:2] for n, x in rescue_probs.groupby('strata')
+            }
+        rescue_probs = {
+            k: {
+                cn.N_OFFERS_TILL_RESCUE: v['offers_before_rescue'].to_numpy(),
+                cn.PROB_TILL_RESCUE: v['prob'].to_numpy()
+            }
+            for k, v in rescue_probs.items()
         }
-    rescue_probs = {
-        k: {
-            cn.N_OFFERS_TILL_RESCUE: v['offers_before_rescue'].to_numpy(),
-            cn.PROB_TILL_RESCUE: v['prob'].to_numpy()
+    else:
+        rescue_probs = {
+            cn.N_OFFERS_TILL_RESCUE: rescue_probs.loc[:, 'offers_before_rescue'].to_numpy(),
+            cn.PROB_TILL_RESCUE: rescue_probs.loc[:, 'prob'].to_numpy()
         }
-        for k, v in rescue_probs.items()
-    }
-
     return rescue_probs
 
 
@@ -259,7 +280,7 @@ def read_donors(
 
     data_: pd.DataFrame = _read_with_datetime_cols(
         input_path=input_path,
-        dtps=dtypes.DTYPE_DONORBALLIST,
+        dtps=dtypes.DTYPE_DONORLIST,
         casecols=True,
         usecols=usecols,
         datecols=datecols,
@@ -304,7 +325,7 @@ def read_donor_balances(
     )
 
     # Remove donors not from ET
-    data_ = data_[data_[cn.D_COUNTRY].isin(es.ET_COUNTRIES)]
+    data_ = data_[data_[cn.D_ALLOC_COUNTRY].isin(es.ET_COUNTRIES)]
 
     # Filter to donors which occured prior to simulation start date
     data_ = data_[data_[cn.D_DATE] <= sim_start_date]
@@ -382,8 +403,11 @@ def read_diags(input_path: str, **kwargs) -> pd.DataFrame:
     return data_
 
 
-def read_profiles(input_path: str, **kwargs) -> pd.DataFrame:
+def read_profiles(input_path: str, usecols: Optional[List[str]] = None, **kwargs) -> pd.DataFrame:
     """"Read in patient file."""
+
+    if usecols is None:
+        usecols = list(dtypes.DTYPE_PROFILES.keys())
 
     data_ = _read_with_datetime_cols(
         input_path,
@@ -466,9 +490,14 @@ def read_sim_settings(
             sim_set[k], min_time
         )
 
-    sim_set['calc_score'] = MatchPointFunction(
-        intercept = sim_set[cn.POINTS_ALLOCATION.upper()]['INTERCEPT'],
-        coef = sim_set[cn.POINTS_ALLOCATION.upper()],
+    sim_set['calc_etkas_score'] = MatchPointFunction(
+        intercept = sim_set[cn.POINTS_ETKAS.upper()]['INTERCEPT'],
+        coef = sim_set[cn.POINTS_ETKAS.upper()],
+        points_comp_to_group=es.POINT_COMPONENTS_TO_GROUP
+    )
+    sim_set['calc_esp_score'] = MatchPointFunction(
+        intercept = sim_set[cn.POINTS_ESP.upper()]['INTERCEPT'],
+        coef = sim_set[cn.POINTS_ESP.upper()],
         points_comp_to_group=es.POINT_COMPONENTS_TO_GROUP
     )
 

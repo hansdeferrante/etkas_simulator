@@ -43,7 +43,7 @@ HLA_LOCI = (HLA_A, HLA_B, HLA_DR, HLA_DQA, HLA_DQB)
 
 
 PUBLICS = tuple('Cw' + str(i) for i in range(20)) + ('Bw6', 'Bw4')
-PUBLICS = set(tuple(x.upper() for x in PUBLICS) + PUBLICS)
+PUBLICS = set(tuple(x.upper() for x in PUBLICS))
 
 # Unsplittables
 DR3 = 'DR3'

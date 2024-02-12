@@ -17,7 +17,9 @@ import pandas as pd
 
 from simulator.code.utils import round_to_int
 import simulator.magic_values.column_names as cn
+import simulator.magic_values.magic_values_rules as mgr
 import simulator.magic_values.etkass_settings as es
+from simulator.magic_values.rules import FRACTIONS_RETURN_WAITINGTIME
 from simulator.code.functions import construct_piecewise_term
 from simulator.code.entities import Patient
 from simulator.code.AllocationSystem import MatchRecord
@@ -184,7 +186,7 @@ class PostTransplantPredictor:
 
         scale = self._calculate_weibull_scale(
                         offer,
-                        status=offer.__dict__[cn.URGENCY_CODE],
+                        # stratum=offer.__dict__[cn.URGENCY_CODE],
                         verbose=verbose,
                         transform=True
                     )
@@ -193,7 +195,7 @@ class PostTransplantPredictor:
 
         shape = self._calculate_weibull_shape(
             offer,
-            status=offer.__dict__[cn.URGENCY_CODE],
+            # stratum=offer.__dict__[cn.URGENCY_CODE],
             verbose=verbose,
             transform=True
         )
@@ -220,7 +222,7 @@ class PostTransplantPredictor:
 
         scale = self._calculate_weibull_scale(
                         offer,
-                        status=offer.__dict__[cn.URGENCY_CODE],
+                        # stratum=offer.__dict__[cn.URGENCY_CODE],
                         verbose=verbose,
                         transform=True
                     )
@@ -229,7 +231,7 @@ class PostTransplantPredictor:
 
         shape = self._calculate_weibull_shape(
             offer,
-            status=offer.__dict__[cn.URGENCY_CODE],
+            # stratum=offer.__dict__[cn.URGENCY_CODE],
             verbose=verbose,
             transform=True
         )
@@ -246,7 +248,8 @@ class PostTransplantPredictor:
     def simulate_failure_cause_and_relisttime(
         self,
         offer: MatchRecord,
-        time: float
+         time: float,
+        stratum: Optional[str] = None
     ) -> Tuple[str, Optional[float]]:
         """ Simulate a failure cause, i.e. calculate the probability
             that an offer results in a patient failure, and return
@@ -255,7 +258,7 @@ class PostTransplantPredictor:
 
         # Select right relisting probabilities
         relist_info = self.times_to_relist[
-            offer.__dict__[cn.URGENCY_CODE]
+            offer.__dict__.get(stratum) if stratum else None
         ]
 
         # Determine the right horizon to sample from
@@ -299,7 +302,7 @@ class PostTransplantPredictor:
         surv_offset = self.calculate_survival_time(
             offer=offer,
             surv=surv,
-            verbosity=verbosity
+            verbosity=0
         )
 
         if surv_offset <= max_surv_hor:
@@ -322,7 +325,7 @@ class PostTransplantPredictor:
 
     def _calculate_weibull_param(
             self, offer: MatchRecord,
-            param: str, status: str,
+            param: str, stratum: Optional[str] = None,
             verbose=False
     ) -> float:
         """
@@ -331,7 +334,7 @@ class PostTransplantPredictor:
 
         linpred = 0
 
-        for k, d in self.fixed_effects[status][param].items():
+        for k, d in self.fixed_effects[stratum][param].items():
             linpred_b4 = linpred
             var2 = None
             if isinstance(d, dict):
@@ -378,14 +381,14 @@ class PostTransplantPredictor:
                     print(f'{k}: {linpred-linpred_b4}')
 
         for orig_var, d in self.continuous_transformations[
-            status
+            stratum
         ][param].items():
             for coef_to_get, trafo in d.items():
 
                 contr = (
                     trafo(offer.__dict__[orig_var]) *
                     self.continuous_effects[
-                        status
+                        stratum
                     ][param][orig_var][coef_to_get]
                 )
                 linpred += contr
@@ -397,13 +400,14 @@ class PostTransplantPredictor:
 
     def _calculate_weibull_scale(
             self, offer: MatchRecord,
-            status: str, param: str = 'scale',
+            stratum: Optional[str] = None,
+            param: str = 'scale',
             verbose=False,
             transform: bool = True
     ) -> float:
         """Calculate weibull scale parameter for an offer"""
         linpred = self._calculate_weibull_param(
-            offer=offer, status=status, param=param,
+            offer=offer, stratum=stratum, param=param,
             verbose=verbose
         )
         if transform:
@@ -413,13 +417,14 @@ class PostTransplantPredictor:
 
     def _calculate_weibull_shape(
             self, offer: MatchRecord,
-            status: str, param: str = 'shape',
+            stratum: Optional[str]=None,
+            param: str = 'shape',
             verbose=False,
             transform: bool = True
     ) -> float:
         """Calculate weibull shape parameter for an offer"""
         linpred = self._calculate_weibull_param(
-            offer=offer, status=status, param=param,
+            offer=offer, stratum=stratum, param=param,
             verbose=verbose
         )
         if transform:
@@ -641,7 +646,7 @@ class PostTransplantPredictor:
         offer = deepcopy(offer)
 
         # Add time to reregistration, time from reregistration to
-        # real event time, # and time to real event time from current date.
+        # real event time, and time to real event time from current date.
         offer.__dict__[cn.TIME_TO_REREG] = (
             relist_date - curr_date
         ) / timedelta(days=1)
@@ -665,24 +670,19 @@ class PostTransplantPredictor:
         # Ignore patient profile for retransplant candidate.
         # We copy it over from the original patient.
         if synth_patient.future_statuses:
-            if (
-                synth_patient.__dict__[cn.RECIPIENT_COUNTRY] !=
-                offer.patient.__dict__[cn.RECIPIENT_COUNTRY]
-            ) and synth_patient.future_statuses.return_status_types(
-                        event_types=[cn.SE, cn.NSE]
-            ):
-                event_types_to_remove = [cn.SE, cn.NSE, mgr.PRF]
-            else:
-                event_types_to_remove = [mgr.PRF]
             synth_patient.future_statuses.remove_status_types(
-                remove_event_types=event_types_to_remove
+                remove_event_types=es.STATUS_TYPES_TO_REMOVE
             )
 
-        # Copy over patient specific attributes
+        # Copy over patient specific attributes. First
+        # get the patient's MMP (needed to obtain match frequency).
+        offer.patient.get_et_mmp()
         for attr in es.POSTTXP_COPY_VARS:
             synth_patient.__dict__[attr] = offer.patient.__dict__[attr]
 
         # Fix other patient attributes
+        synth_patient.prev_txp_living = False
+        synth_patient.prev_txp_ped = offer.patient.__dict__[cn.R_PED]
         synth_patient.__dict__[cn.LISTING_DATE] = relist_date
         synth_patient.__dict__[cn.PREV_TX_DATE] = curr_date
         synth_patient.__dict__[cn.TIME_SINCE_PREV_TXP] = (
@@ -690,7 +690,6 @@ class PostTransplantPredictor:
         ) / timedelta(days=1)
         synth_patient.__dict__[cn.TYPE_RETX] = cn.RETRANSPLANT_DURING_SIM
         synth_patient.__dict__[cn.RETRANSPLANT] = 1
-
         synth_patient.age_days_at_listing = round_to_int(
             (relist_date - synth_patient.r_dob) / timedelta(days=1)
             )
@@ -698,6 +697,44 @@ class PostTransplantPredictor:
             synth_patient.__dict__[cn.LISTING_DATE] -
             synth_patient.sim_set.SIM_START_DATE
         ) / timedelta(days=1)
+
+        # Fix new dialysis date. Do this based on matched synthetic re-registration.
+        delta_dialdate_relistingdate: float = (
+            synth_patient.get_dial_time_at_listing()
+            if (
+                synth_patient.get_dial_time_at_listing() is not None and
+                not isnan(synth_patient.get_dial_time_at_listing())
+            )
+            else 0
+        )
+        if (pot_dial_date := relist_date + timedelta(days=delta_dialdate_relistingdate)) <= curr_date:
+            new_dial_date = curr_date
+        else:
+            new_dial_date = pot_dial_date
+        synth_patient.set_dial_date(new_dial_date)
+
+        # Fix previously accrued waiting time, based on new dialysis date.
+        time_to_redial = (new_dial_date - curr_date) / timedelta(days=1)
+        for frac_fun, frac in FRACTIONS_RETURN_WAITINGTIME.items():
+            if frac_fun(time_to_redial):
+                break
+        else:
+            frac = 0
+
+        total_waittime = (
+            offer.patient.__dict__[cn.PREVIOUS_WT] +
+            offer.__dict__[cn.YEARS_ON_DIAL]
+        )
+        synth_patient.__dict__[cn.PREVIOUS_T] = (
+            total_waittime * frac
+        )
+
+        if verbosity > 0:
+            print('Synthetic patient info:')
+            print(synth_patient.__dict__)
+            print('Transplanted patient info:')
+            print(offer.patient.__dict__)
+            print(f'curr_date: {curr_date}, relist_date: {relist_date}, delta: {delta_dialdate_relistingdate}, new_dial_date: {new_dial_date}, {time_to_redial}, frac: {frac}, total: {total_waittime}, return: {frac*total_waittime}')
 
         # If we force matches to exit after, and real time-to-event is
         # within the threshold schedule a terminal death event

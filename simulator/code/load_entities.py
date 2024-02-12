@@ -44,6 +44,9 @@ def _read_patients_rich(
     d_patients: pd.DataFrame = rdr.read_patients(
         sim_set.PATH_PATIENTS, **kwargs
     )
+    d_patients.loc[:, cn.PATIENT_HLA] = rdr.fix_hla_string(
+        d_patients.loc[:, cn.PATIENT_HLA]
+    )
 
     # Read only patient data in before end of simulation.
     end_date = (
@@ -128,7 +131,8 @@ def _rcrd_to_patient(sim_set: DotDict, hla_system: HLASystem, rcrd: dict[Hashabl
         hla=rcrd[cn.PATIENT_HLA],
         hla_system=hla_system,
         previous_wt=rcrd[cn.PREVIOUS_T],
-        kidney_program=rcrd[cn.KIDNEY_PROGRAM]
+        kidney_program=rcrd[cn.KIDNEY_PROGRAM],
+        date_first_dial=rcrd[cn.DATE_FIRST_DIAL]
     )
 
 
@@ -197,7 +201,8 @@ def load_retransplantations(sim_set: DotDict, hla_system: HLASystem, **kwargs) -
 
 
 def load_balances(
-        sim_set: DotDict
+        sim_set: DotDict,
+        update_balances: bool = True
 ) -> BalanceSystem:
     """Load list of donors"""
 
@@ -213,7 +218,8 @@ def load_balances(
     balance_system = BalanceSystem.from_balance_df(
         ss=sim_set,
         df_init_balances=d_bal,
-        group_vars=sim_set.BALANCE_GROUP_VARS
+        group_vars=sim_set.BALANCE_GROUP_VARS,
+        update_balances=update_balances
     )
 
     return balance_system
@@ -239,8 +245,9 @@ def load_donors(
     donor_dict = {
             rcrd[cn.ID_DONOR]: Donor(
                 id_donor=rcrd[cn.ID_DONOR],
+                n_kidneys_available=rcrd[cn.N_KIDNEYS_AVAILABLE],
                 bloodgroup=rcrd[cn.D_BLOODGROUP],
-               donor_country=rcrd[cn.D_COUNTRY],
+                donor_country=rcrd[cn.D_COUNTRY],
                 donor_region=rcrd[cn.D_REGION],
                 donor_center=rcrd[cn.D_CENTER],
                 reporting_date=rcrd[cn.D_DATE],
@@ -253,14 +260,18 @@ def load_donors(
                 meningitis=rcrd[cn.D_MENINGITIS],
                 malignancy=rcrd[cn.D_MALIGNANCY],
                 drug_abuse=rcrd[cn.D_DRUG_ABUSE],
-                marginal=rcrd[cn.D_MARGINAL],
                 euthanasia=rcrd[cn.D_EUTHANASIA],
                 tumor_history=rcrd[cn.D_TUMOR_HISTORY],
                 donor_marginal_free_text=rcrd[cn.D_MARGINAL_FREE_TEXT],
-                donor_death_cause_group=rcrd[cn.DONOR_DEATH_CAUSE_GROUP],
+                death_cause_group=rcrd[cn.DEATH_CAUSE_GROUP],
                 diabetes=rcrd[cn.D_DIABETES],
                 hla_system=hla_system,
-                hla=rcrd[cn.DONOR_HLA]
+                hla=rcrd[cn.DONOR_HLA],
+                hypertension=rcrd[cn.D_HYPERTENSION],
+                last_creat=rcrd[cn.D_LAST_CREAT],
+                smoker=rcrd[cn.D_SMOKING],
+                cardiac_arrest=rcrd[cn.D_CARREST],
+                rescue=False if sim_set.get('SIMULATE_RESCUE', False) else bool(rcrd[cn.D_RESCUE])
             ) for rcrd in d_don.to_dict(orient='records')
         }
 
@@ -346,6 +357,12 @@ def preload_status_updates(
         d_status_updates[cn.ID_REGISTRATION].isin(
             patients.keys()
         )
+    ]
+
+    # Remove status updates which are real FU's
+    d_status_updates = d_status_updates.loc[
+        d_status_updates.loc[:, cn.TYPE_UPDATE] != 'SFU',
+        :
     ]
 
     # Check whether imputation procedure was run correctly

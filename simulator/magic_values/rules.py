@@ -21,16 +21,21 @@ from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
     from simulator.code import entities
 
+def le_91(_t):
+    return _t <= 91
+def le_183(_t):
+    return _t <= 183
+def le_275(_t):
+    return _t <= 275
+def le_365(_t):
+    return _t <= 365
 
-DEFAULT_MELD_ETCOMP_THRESH = 30
-
-# NSE rules for ET countries. Tuples of
-# index in NSE_ID, initial 30-d equivalent,
-# and 90-day upgrade, and max equivalent.
-NSE_UPGRADES = [
-    (1, 10, 10, 40),
-    (2, 15, 10, 40)
-]
+FRACTIONS_RETURN_WAITINGTIME = {
+    le_91: 1,
+    le_183: 0.75,
+    le_275: 0.50,
+    le_365: 0.25
+}
 
 
 # Center information
@@ -47,12 +52,17 @@ FL_CENTER_CODES = {
 }
 
 DICT_CENTERS_TO_REGIONS = {
+    'GHMTP': 'GND',
     'GHOTP': 'GND',
+    'GBMTP': 'GND',
     'GBCTP': 'GNO',
+    'GBETP': 'GNO',
+    'GBATP': 'GNW',
     'GESTP': 'GNW',
     'GHGTP': 'GND',
     'GHBTP': 'GBW',
     'GTUTP': 'GBW',
+    'GSTTP': 'GBW',
     'GRBTP': 'GBY',
     'GFMTP': 'GMI',
     'GMZTP': 'GMI',
@@ -61,6 +71,7 @@ DICT_CENTERS_TO_REGIONS = {
     'GBOTP': 'GNW',
     'GMLTP': 'GBY',
     'GMNTP': 'GNW',
+    'GKKTP': 'GNW',
     'GKITP': 'GND',
     'GGOTP': 'GND',
     'GMHTP': 'GBY',
@@ -80,9 +91,14 @@ DICT_CENTERS_TO_REGIONS = {
     'GMIOR': 'GMI',
     'GNWOR': 'GNW',
     'GBYOR': 'GBY',
+    'GAUTP': 'GBY',
+    'GERTP': 'GBY',
+    'GDMTP': 'GBY',
+    'GNBTP': 'GBY',
     'GNDOR': 'GND',
     'GFRTP': 'GBW',
     'GLUTP': 'GND',
+    'GMBTP': 'GNO',
     'GMATP': 'GBW',
     'GULTP': 'GBW',
     'GGITP': 'GMI',
@@ -92,32 +108,50 @@ DICT_CENTERS_TO_REGIONS = {
     'GBBTP': 'GNW',
     'GDUTP': 'GNW',
     'GDRTP': 'GOS',
-    'GFDTP': 'GMI',
-    'GMRTP': 'GMI'
+    'GFDTP': 'GMI'
 }
 
-# Blood group rules which are applied to donor/recipient matches
-# (tables 4.1.1-4.1.3 in the FS.)
-RECIPIENT_ELIGIBILITY_TABLES = {
-    (cn.TAB2, 1): ([cn.TYPE_OFFER], ['Split']),
-    (cn.TAB2, 2): ([cn.D_PED, cn.R_PED], [True, True]),
-    (cn.TAB1, 1): ([cn.D_ALLOC_COUNTRY], [mgr.GERMANY])
-}
-DEFAULT_BG_TAB_COLLE = cn.TAB3
 
-# Blood group compatibility tables. Tab1 is used for German donors,
-# tab2 for split donors and pediatric donor/recipients, tab3 is
-# used for non-German donors (see above). Each blood group table
-# is a dictionary. Keys are tuples (to disambiguate), where the
-# first value refers to the type of blood group rule that is to
-# be applied. The values are tuples of column variables/values,
-# which must be equal to belong to the group.
-BG_COMPATIBILITY_TAB = {}
-
-BG_COMPATIBILITY_DEFAULTS = {
-    cn.TAB1: cn.BGC_TYPE2,
-    cn.TAB2: cn.BGC_FULL,
-    cn.TAB3: cn.BGC_TYPE2
+DICT_ESP_SUBREGIONS = {
+    'GHBTP': 'STUTTGART',   #GBW
+    'GMATP': 'STUTTGART',   #GBW
+    'GSTTP': 'STUTTGART',   #GBW
+    'GTUTP': 'STUTTGART',   #GBW
+    'GFRTP': 'FREIBURG',    #GBW
+    'GAUTP': 'MUNCHEN',     #GBY
+    'GMHTP': 'MUNCHEN',     #GBY
+    'GMLTP': 'MUNCHEN',     #GBY
+    'GRBTP': 'MUNCHEN',
+    'GNBTP': 'ERLANGEN',
+    'GWZTP': 'ERLANGEN',    #GBY
+    'GFMTP': 'MAINZ',       #GMI
+    'GMZTP': 'MAINZ',
+    'GHSTP': 'HOMBURG',
+    'GKSTP': 'HOMBURG',
+    'GFDTP': 'MARBURG',
+    'GGITP': 'MARBURG',
+    'GMRTP': 'MARBURG',     #GMI
+    'GBMTP': 'HANNOVER',    #GND
+    'GHOTP': 'HANNOVER',
+    'GHMTP': 'HANNOVER',
+    'GHGTP': 'HAMBURG',
+    'GKITP': 'HAMBURG',
+    'GLUTP': 'HAMBURG',     #GND
+    'GBETP': 'BERLIN',      #GNO
+    'GBCTP': 'BERLIN',
+    'GROTP': 'ROSTOCK',     #GNO
+    'GBBTP': 'DUSSELDORF',  #GNW
+    'GDUTP': 'DUSSELDORF',
+    'GESTP': 'DUSSELDORF',
+    'GAKTP': 'KOLNBONN',
+    'GBOTP': 'KOLNBONN',
+    'GKLTP': 'KOLNBONN',
+    'GKMTP': 'KOLNBONN',
+    'GMNTP': 'MUENSTER',    #GNW
+    'GDRTP': 'LEIPZIG',     #GOS
+    'GHATP': 'LEIPZIG',
+    'GJETP': 'LEIPZIG',
+    'GLPTP': 'LEIPZIG'
 }
 
 # Dictionary of blood group compatibility rules. For each rule,
@@ -148,12 +182,6 @@ BLOOD_GROUP_INCOMPATIBILITY_DICT = {
     k: set(cg.BG_LEVELS).difference(v)
     for k, v in BLOOD_GROUP_COMPATIBILITY_DICT[cn.BGC_FULL].items()
 }
-
-
-# Zip rules
-RECIPIENT_ELIGIBILITY_TABLES = zip_recursively_to_tuple(RECIPIENT_ELIGIBILITY_TABLES)
-BG_COMPATIBILITY_TAB = zip_recursively_to_tuple(BG_COMPATIBILITY_TAB)
-
 
 
 # Functions to check whether donor/patient are pediatric

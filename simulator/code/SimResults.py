@@ -8,7 +8,7 @@ Created on Wed Feb  2 17:33:44 2022
 
 from functools import reduce
 from datetime import datetime, timedelta
-from typing import Tuple, Optional, Dict
+from typing import Tuple, Optional, Dict, List
 import numpy as np
 import os
 import pandas as pd
@@ -16,11 +16,13 @@ import typing
 import gzip
 import shutil
 
+from simulator.magic_values.rules import check_etkas_ped_rec
 from simulator.code.utils import round_to_decimals
 from simulator.code.utils import DotDict
 import simulator.magic_values.etkass_settings as es
 import simulator.magic_values.column_names as cn
 from simulator.magic_values.inputfile_settings import DEFAULT_DMY_HMS_FORMAT
+import simulator.magic_values.magic_values_rules as mgr
 
 if typing.TYPE_CHECKING:
     from simulator.code import entities
@@ -55,27 +57,20 @@ class SimResults:
             cols_to_save_patients: Tuple[str, ...],
             sim_set: DotDict
     ):
-        self.cols_to_save_exit = set(cols_to_save_exit)
-        self.cols_to_save_discard = set(cols_to_save_discard)
-        self.cols_to_save_patients = set(cols_to_save_patients)
+        self.cols_to_save_exit = cols_to_save_exit
+        self.cols_to_save_discard = cols_to_save_discard
+        self.cols_to_save_patients = cols_to_save_patients
         self.transplantations = []
         self.posttransplant = []
         self.exits = []
         self.discards = []
         self.match_lists = []
-        self.mmats = []
 
         self.path_txp: str = (
             sim_set.RESULTS_FOLDER + sim_set.PATH_TRANSPLANTATIONS
         )
         self.path_exits: str = sim_set.RESULTS_FOLDER + sim_set.PATH_EXITS
         self.path_dsc: str = sim_set.RESULTS_FOLDER + sim_set.PATH_DISCARDS
-        if sim_set.get('PATH_MEDIAN_MELDS'):
-            self.path_mmats: str = (
-                sim_set.RESULTS_FOLDER + sim_set.PATH_MEDIAN_MELDS
-            )
-        else:
-            self.path_mmats = None
         self.path_pat: str = (
             sim_set.RESULTS_FOLDER + sim_set.PATH_FINAL_PATIENT_STATUS
         )
@@ -90,16 +85,6 @@ class SimResults:
 
         self.save_ml: bool = sim_set.SAVE_MATCH_LISTS
 
-    def save_mmats(
-        self,
-        date,
-        mmats: Dict[str, int]
-    ) -> None:
-        mmats[cn.MMAT_DATE] = date
-        self.mmats.append(
-            mmats
-        )
-
     def save_transplantation(
         self,
         pat: 'entities.Patient',
@@ -107,16 +92,47 @@ class SimResults:
     ) -> None:
         """Save a transplantation to the transplantation list."""
 
+        # Prepare potentially missing columns
+        matchr.patient.get_pediatric(
+            ped_fun = check_etkas_ped_rec,
+            match_age = matchr.__dict__[cn.R_MATCH_AGE]
+        )
+
         # Combined dictionary
         result_dict = matchr.return_match_info(
             cols=self.cols_to_save_exit
         )
+
         result_dict[cn.TIME_WAITED] = round_to_decimals(
             (
                 pat.__dict__[cn.EXIT_DATE] - pat.__dict__[cn.LISTING_DATE]
             ) / timedelta(days=1),
             2
         )
+
+        result_dict[cn.ALLOCATION_PROGRAM] = (
+            mgr.ESP if matchr.__class__.__name__ == 'MatchRecordCurrentESP' else mgr.ETKAS
+            if matchr.__class__.__name__ == 'MatchRecordCurrentETKAS'
+            else None
+        )
+        result_dict[cn.EXT_ALLOC_TRIGGERED] = (
+            1 if matchr.__dict__.get(cn.EXT_ALLOC_PRIORITY) is not None
+            else 0
+        )
+
+        if result_dict[cn.ALLOCATION_PROGRAM] == mgr.ESP:
+            result_dict[cn.ALLOCATION_MECHANISM] = mgr.ESP
+        elif result_dict[cn.ALLOCATION_PROGRAM] == mgr.ETKAS:
+            if result_dict[cn.EXT_ALLOC_TRIGGERED] == 1:
+                if result_dict[cn.ACCEPTANCE_REASON] == cn.T3:
+                    result_dict[cn.ALLOCATION_MECHANISM] = f'{mgr.ETKAS}_RESCUE'
+                else:
+                    result_dict[cn.ALLOCATION_MECHANISM] = f'{mgr.ETKAS}_EA'
+            else:
+                result_dict[cn.ALLOCATION_MECHANISM] = f'{mgr.ETKAS}_REGULAR'
+        else:
+            print(f'Warning: unknown allocation mechanism? ({result_dict[cn.ALLOCATION_PROGRAM]} program)')
+
         self.transplantations.append(
             result_dict
         )
@@ -135,7 +151,6 @@ class SimResults:
             cn.ID_DONOR: matchr_.donor.__dict__[cn.ID_DONOR],
             cn.ID_RECIPIENT: matchr_.patient.__dict__[cn.ID_RECIPIENT],
             cn.ID_REREGISTRATION: rereg_id,
-            cn.TYPE_TRANSPLANTED: matchr_.__dict__[cn.TYPE_TRANSPLANTED],
             cn.PATIENT_FAILURE_DATE: (
                 date_failure if (
                     date_failure and
@@ -169,14 +184,15 @@ class SimResults:
 
     def save_discard(
             self,
-            matchl_: 'AllocationSystem.MatchList'
+            n_discarded: int,
+            donor: 'entities.Donor',
+            matchl_: List['AllocationSystem.MatchRecord']
     ) -> None:
         """Save an exit into the exiting list."""
 
         # Count number of center offers & any obl.
-        n_center_offers = 0
         profile_turndowns = 0
-        for offer in matchl_.return_match_list():
+        for offer in matchl_:
             if (
                 offer.patient.profile is None or
                 not offer.patient.profile._check_acceptable(
@@ -185,18 +201,23 @@ class SimResults:
             ):
                 profile_turndowns += 1
 
-        result_dict = reduce(
-            lambda a, b: {**a, **b},
-            [o.__dict__ for o in [matchl_, matchl_.donor] if o is not None]
+        if len(matchl_) > 0:
+            result_dict = reduce(
+                lambda a, b: {**a, **b},
+                [o.__dict__ for o in [matchl_[0], donor] if o is not None]
             )
-
+        else:
+            result_dict = reduce(
+                lambda a, b: {**a, **b},
+                [o.__dict__ for o in [donor] if o is not None]
+            )
         dict_to_return = {
             k: v for k, v in result_dict.items()
             if k in self.cols_to_save_discard
         }
 
         # Add relevant discard information.
-        dict_to_return[cn.N_OFFERS] = len(matchl_.return_match_list())
+        dict_to_return[cn.N_OFFERS] = len(matchl_)
         dict_to_return[cn.N_PROFILE_TURNDOWNS] = profile_turndowns
 
         self.discards.append(
@@ -226,14 +247,7 @@ class SimResults:
             col for col in self.cols_to_save_exit if col in data_.columns
         ]
         data_ = data_.loc[:, cols]
-        data_.dropna(how='all', axis=1, inplace=True)
-        return data_
-
-    def return_mmats(self) -> pd.DataFrame:
-        """Return exits (RM) as a pd.DataFrame"""
-        data_ = pd.DataFrame.from_records(
-            self.mmats
-        )
+        data_.dropna(how='all', axis='columns', inplace=True)
         return data_
 
     def return_discards(self) -> pd.DataFrame:
@@ -246,7 +260,7 @@ class SimResults:
             col for col in self.cols_to_save_discard if col in data_.columns
         ]
         data_ = data_.loc[:, cols]
-        data_.dropna(how='all', axis=1, inplace=True)
+        data_.dropna(how='all', axis='columns', inplace=True)
         return data_
 
     def return_patient_info(
@@ -254,14 +268,15 @@ class SimResults:
         patients: Dict[int, 'entities.Patient']
     ) -> pd.DataFrame:
         """Return patient info"""
+
         data_ = pd.DataFrame.from_records(
-            [p.return_dict_with_melds() for p in patients.values()],
+            [p.__dict__ | {cn.ET_MMP: p.get_et_mmp()} for p in patients.values()],
             columns=self.cols_to_save_patients
         )
         cols = [
             col for col in self.cols_to_save_patients if col in data_.columns
         ]
-        data_.dropna(how='all', axis=1, inplace=True)
+        data_.dropna(how='all', axis='columns', inplace=True)
         data_ = data_.loc[:, cols]
         data_.loc[:, cn.R_AGE_LISTING] = (
             data_.loc[:, cn.TIME_REGISTRATION] - data_.loc[:, cn.R_DOB]
@@ -277,7 +292,7 @@ class SimResults:
         data_ = data_.loc[:, list(es.MATCH_INFO_COLS)]
         id_cols = [c for c in data_.columns if c.startswith('id')]
         data_.loc[:, id_cols] = data_.loc[:, id_cols].astype('Int64')
-        data_.dropna(how='all', axis=1, inplace=True)
+        data_.dropna(how='all', axis='columns', inplace=True)
         return data_
 
     def return_transplantations(
@@ -289,21 +304,26 @@ class SimResults:
         """Return transplantation information as DataFrame."""
         data_ = pd.DataFrame.from_records(
             self.transplantations,
-            columns=self.cols_to_save_exit.union(es.OUTPUT_COLS_EXIT_CONSTRUCTED)
+            columns=self.cols_to_save_exit + es.OUTPUT_COLS_EXIT_CONSTRUCTED
         )
         cols = [
-            col for col in self.cols_to_save_exit.union(es.OUTPUT_COLS_EXIT_CONSTRUCTED)
-            if col in data_.columns
+            col for col in data_.columns
+            if col in self.cols_to_save_exit + es.OUTPUT_COLS_EXIT_CONSTRUCTED
         ]
         data_ = data_.loc[:, cols]
-        data_.dropna(how='all', axis=1, inplace=True)
+        data_.dropna(how='all', axis='columns', inplace=True)
+        data_.loc[:, cn.ID_REGISTRATION] = (
+            data_.loc[:, cn.ID_REGISTRATION].astype(object)
+        )
 
-        if save_posttxp:
+
+        if save_posttxp and len(self.posttransplant) > 0:
             # Add post-transplant information
             # (graft failure & patient failure dates)
             d_posttxp = pd.DataFrame.from_records(
                 self.posttransplant
             )
+
             data_ = data_.merge(
                 d_posttxp,
                 on=[cn.ID_DONOR, cn.ID_RECIPIENT],
@@ -332,6 +352,10 @@ class SimResults:
             ].rename(
                 columns={cn.ID_REGISTRATION: cn.ID_REREGISTRATION}
             )
+            d_sim_exits.loc[:, cn.ID_REREGISTRATION] = (
+                d_sim_exits.loc[:, cn.ID_REREGISTRATION].astype(object)
+            )
+
             data_ = data_.merge(
                 d_sim_exits,
                 on=[cn.ID_REREGISTRATION],
@@ -385,20 +409,21 @@ class SimResults:
             ] = data_.loc[
                 :, 'exit_date_rereg'
             ]
+
             data_.loc[:, cn.TIME_TO_PATIENT_FAILURE] = (
-                data_.loc[:, cn.PATIENT_FAILURE_DATE] -
-                data_.loc[:, cn.MATCH_DATE]
-            ).apply(lambda td: td / timedelta(days=1))
+                pd.to_datetime(data_.loc[:, cn.PATIENT_FAILURE_DATE]) -
+                pd.to_datetime(data_.loc[:, cn.MATCH_DATE])
+            ).dt.days
 
             # Construct time-to-retransplant and time-to-rereg columns
             data_.loc[:, cn.TIME_TO_RETX] = (
-                data_.loc[:, cn.DATE_RETRANSPLANT] -
-                data_.loc[:, cn.MATCH_DATE]
-            ).apply(lambda td: td / timedelta(days=1))
+                pd.to_datetime(data_.loc[:, cn.DATE_RETRANSPLANT]) -
+                pd.to_datetime(data_.loc[:, cn.MATCH_DATE])
+            ).dt.days
             data_.loc[:, cn.TIME_TO_REREG] = (
-                data_.loc[:, cn.PATIENT_RELISTING_DATE] -
-                data_.loc[:, cn.MATCH_DATE]
-            ).apply(lambda td: td / timedelta(days=1))
+                pd.to_datetime(data_.loc[:, cn.PATIENT_RELISTING_DATE]) -
+                pd.to_datetime(data_.loc[:, cn.MATCH_DATE])
+            ).dt.days
 
             # Construct retransplant indicator column
             data_.loc[:, cn.RETRANSPLANTED] = (
@@ -508,23 +533,6 @@ class SimResults:
             date_format=DEFAULT_DMY_HMS_FORMAT
         )
 
-    def mmats_to_file(
-        self,
-        file: Optional[str] = None
-    ) -> None:
-        """Save patient deaths to file"""
-        if file is None:
-            file = self.path_mmats
-        data_ = self.return_mmats()
-        outdir = os.path.dirname(file)
-        if not os.path.exists(outdir):
-            os.makedirs(outdir)
-        data_.to_csv(
-            path_or_buf=file,
-            index=False,
-            date_format=DEFAULT_DMY_HMS_FORMAT
-        )
-
     def match_lists_to_file(
             self,
             file: Optional[str] = None,
@@ -594,7 +602,6 @@ class SimResults:
             save_posttxp=save_posttxp
             )
         self.exits_to_file()
-        self.obls_to_file(obligations)
         if patients:
             self.patients_to_file(
                 patients
@@ -604,5 +611,3 @@ class SimResults:
             self.gzip_csv_file(
                 file=self.path_ml
             )
-        if self.mmats:
-            self.mmats_to_file()

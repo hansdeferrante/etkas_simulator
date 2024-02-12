@@ -8,7 +8,7 @@ Created on Wed Feb  2 17:33:44 2022
 
 from collections.abc import Mapping
 from copy import deepcopy
-from typing import Any, Dict, Tuple, List
+from typing import Any, Dict, Tuple, List, Set
 from math import isnan
 
 # Define a type hint for a single key-value pair.
@@ -26,6 +26,9 @@ def round_to_decimals(x: float, p: int):
         return x
     p = float(10**p)
     return int(x * p + 0.5)/p
+
+def len_setdiff(s1: Set[Any], s2: Set[Any]):
+    return sum(1 for item in s1 if item not in s2)
 
 class DotDict(dict):
     """Helper class which allows access with dot operator

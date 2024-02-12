@@ -14,10 +14,13 @@ from collections import defaultdict
 from statistics import median
 import time
 import typing
+from operator import attrgetter
 
 from simulator.code.utils import DotDict, round_to_decimals
 from simulator.code.current_etkas.CurrentETKAS import \
-    MatchListCurrentETKAS, MatchRecordCurrentETKAS
+    MatchListCurrentETKAS, MatchRecordCurrentETKAS, \
+    MatchListESP, PatientMatchRecord
+from simulator.code.ScoringFunction import MatchPointFunction
 from simulator.code.AcceptanceModule import AcceptanceModule
 from simulator.code.PostTransplantPredictor import PostTransplantPredictor
 from simulator.code.EventQueue import EventQueue
@@ -25,9 +28,9 @@ from simulator.code.Event import Event
 from simulator.code.load_entities import \
         preload_profiles, preload_status_updates, load_patients, \
         load_donors, load_retransplantations, HLASystem, \
-        load_balances
+        load_balances, BalanceSystem
 from simulator.code.entities import (
-    Patient
+    Patient, Donor
 )
 from simulator.code.SimResults import SimResults
 import simulator.magic_values.column_names as cn
@@ -49,14 +52,24 @@ class ActiveList:
         Retrieving patients from the active lists prevents having to
         iterate over all patients, and speeds up sorting.
     """
-    def __init__(self, init_patients: Dict[int, Patient]):
+    def __init__(self, init_patients: Dict[int, Patient],
+                 bal_system: BalanceSystem,
+                 match_point_fun: MatchPointFunction):
+
+        # Keep track of necessary attributes
+        self.bal_system = bal_system
+        self.match_point_fun = match_point_fun
+
+        # Order active lists by blood type
         self._active_lists: Dict[str, Dict[int, Patient]] = {
             bg: dict() for bg in es.ALLOWED_BLOODGROUPS
         }
         for id_reg, pat in init_patients.items():
             if pat.active:
                 self._active_lists[pat.bloodgroup][id_reg] = pat
-        self.resort_lists()
+
+        # Initialize sort
+        self.resort_lists(match_time=0)
 
     def get_active_list(self, bg: str) -> ValuesView[Patient]:
         """Returning patients, ordered with priority for bg"""
@@ -69,9 +82,7 @@ class ActiveList:
     def pop_from_active_lists(self, identifier: int) -> None:
         """Remove a patient identifier from active list"""
         for active_list in self._active_lists.values():
-            k = active_list.pop(identifier, None)
-            if k is None:
-                return None
+            active_list.pop(identifier, None)
 
     def is_active(self, identifier: int) -> bool:
         for active_list in self._active_lists.values():
@@ -81,16 +92,31 @@ class ActiveList:
                 return False
         return False
 
-    def resort_lists(self):
+    def resort_lists(self, match_time: float):
+        """
+            Sort active list based on patient match points.
+            This starting order makes sorting faster for the match
+            lists.
+        """
         for bg, active_list in self._active_lists.items():
-            # Sort dictionary by patient (i.e. match MELD)
+            match_point_dict = {
+                id: PatientMatchRecord(
+                    pr,
+                    calc_points=self.match_point_fun,
+                    bal_system=self.bal_system,
+                    match_time=match_time
+                ).total_match_points
+                for id, pr in active_list.items()
+            }
+            # Sort dictionary by patient match points
             self._active_lists[bg] = dict(
                 sorted(
                     active_list.items(),
-                    key = lambda x: (x[1].get_dial_start_time() if x[1].get_dial_start_time() is not None else 0),
+                    key=lambda x: match_point_dict[x[0]],
                     reverse=True
                 )
             )
+
 
 class ETKASS:
     """Class which implements an etkass simulator
@@ -118,8 +144,8 @@ class ETKASS:
 
         # Read in simulation settings
         self.sim_set = sim_set
-        self.init_unacc_mrs = sim_set.get('INITIALIZE_UNACCEPTABLE_MRS', False)
         self.sim_start_date = sim_set['SIM_START_DATE']
+        self.age_esp = sim_set['AGE_ESP']
         self.verbose = verbose
         self.sim_rescue = sim_set.get('SIMULATE_RESCUE', False)
         self.hla_system = HLASystem(sim_set)
@@ -129,9 +155,6 @@ class ETKASS:
         self.sim_time = 0
         self._time_active_list_resorted = 0
         self._resort_every_k_days = 14
-
-        # Keep track of number of obligations generated
-        self.n_obligations = 0
 
         # Set up (empty) event queue
         self.event_queue = EventQueue()
@@ -147,9 +170,9 @@ class ETKASS:
             seed=self.sim_set.SEED,
             center_acc_policy=str(sim_set.CENTER_ACC_POLICY),
             patient_acc_policy=str(sim_set.PATIENT_ACC_POLICY),
-            separate_huaco_model=bool(sim_set.SEPARATE_HUACO_ACCEPTANCE),
-            separate_ped_model=bool(sim_set.SEPARATE_PED_ACCEPTANCE),
-            simulate_rescue=self.sim_rescue
+            # separate_ped_model=bool(sim_set.SEPARATE_PED_ACCEPTANCE),
+            simulate_rescue=self.sim_rescue,
+            verbose=0
         )
         if self.verbose:
             print('Loaded acceptance module')
@@ -196,6 +219,8 @@ class ETKASS:
                 hla_system=self.hla_system,
                 nrows=max_n_patients
             )
+            self.initialize_retransplantations()
+
             preload_status_updates(
                 patients=self.retransplantations,
                 sim_set=sim_set,
@@ -231,7 +256,9 @@ class ETKASS:
 
         # Initialize queue of active patients
         self.active_lists = ActiveList(
-            init_patients=self.patients
+            init_patients=self.patients,
+            bal_system=self.bal_system,
+            match_point_fun=self.sim_set.calc_etkas_score
         )
         if self.verbose:
             print('Initialized patients')
@@ -271,9 +298,9 @@ class ETKASS:
 
         # Initialize simulation results & path to match list file.
         self.sim_results = SimResults(
-            cols_to_save_exit=es.OUTPUT_COLS_EXITS + (self.sim_set.LAB_MELD,),
+            cols_to_save_exit=es.OUTPUT_COLS_EXITS,
             cols_to_save_discard=es.OUTPUT_COLS_DISCARDS,
-            cols_to_save_patients=es.OUTPUT_COLS_PATIENTS + (self.sim_set.LAB_MELD,),
+            cols_to_save_patients=es.OUTPUT_COLS_PATIENTS,
             sim_set=self.sim_set
         )
         self.match_list_file = (
@@ -281,8 +308,17 @@ class ETKASS:
             str(self.sim_set.PATH_MATCH_LISTS)
         )
 
+    def initialize_retransplantations(self):
+        for retx in self.retransplantations.values():
+            if retx.get_dial_time_at_listing() is not None:
+                retx.__dict__[cn.YEARS_ON_DIAL] = (
+                    -1*retx.get_dial_time_at_listing() / 365.25
+                    if retx.get_dial_time_at_listing() < 0
+                    else 0
+                )
+
     def remove_patients_without_statusupdates(
-        self, pat_dict_name: str, verbosity=0
+        self, pat_dict_name: str, verbosity: int = 0
     ) -> None:
         """Removes patients from dict without any updates."""
 
@@ -295,7 +331,7 @@ class ETKASS:
                 n_removed += 1
 
                 del self.__dict__[pat_dict_name][id_reg]
-        if self.verbose:
+        if verbosity > 0:
             print(
                 f'Removed {n_removed} patients from self.{pat_dict_name} '
                 f"that already exited or who don't have any status updates "
@@ -308,19 +344,18 @@ class ETKASS:
     def simulate_allocation(
             self,
             verbose: bool = False,
-            print_progress_every_k_days=90
+            print_progress_every_k_days=90,
+            debug_id_donor: Optional[int] = None
     ) -> Optional[MatchListCurrentETKAS]:
         """Simulate the allocation algorithm"""
 
         # Set seed and maintain count for how many days were simulated.
         next_k_days = 1
-
-        # Save start time, and print simulation period.
         start_time = time.time()
         print(
             f'Simulating ETKAS from {self.sim_start_date.strftime("%Y-%m-%d")}'
-            f' to {self.sim_set.SIM_END_DATE.strftime("%Y-%m-%d")} with allocation '
-            f'based on: \n  {self.sim_set["calc_score"]}'
+            f' to {self.sim_set.SIM_END_DATE.strftime("%Y-%m-%d")} with ETKAS-allocation '
+            f'based on: \n  {self.sim_set["calc_etkas_score"]}'
         )
 
         # Start with an empty match list file.
@@ -339,31 +374,23 @@ class ETKASS:
             not self.event_queue.is_empty() and
             (self.sim_time < self.max_sim_time)
         ):
-            event = self.event_queue.next()
-
             # Print simulation progress
             if self.sim_time / print_progress_every_k_days >= next_k_days:
-                print(
-                    'Simulated up to {0}'.format(
-                        (
-                            self.sim_start_date +
-                            timedelta(days=self.sim_time)
-                        ).strftime('%Y-%m-%d')
-                    )
-                )
+                current_date = (self.sim_start_date + timedelta(days=self.sim_time))
+                print(f"Simulated up to {current_date.strftime('%Y-%m-%d')}")
                 next_k_days += 1
 
-            # Resort list every k days
+            # Resort active list every k days. This speeds up match list sorting.
             if (
-                self.sim_time -
-                self._time_active_list_resorted
-            ) > self._resort_every_k_days:
-                self.active_lists.resort_lists()
+                (self.sim_time - self._time_active_list_resorted) >
+                self._resort_every_k_days
+            ):
+                self.active_lists.resort_lists(match_time=self.sim_time)
                 self._time_active_list_resorted = self.sim_time
 
+            # Progress to next event
+            event = self.event_queue.next()
             self.sim_time = event.event_time
-            if verbose:
-                print(f'{self.sim_time:.2f}: {event}')
 
             if event.type_event == cn.PAT:
                 # Update patient information, and schedule future event
@@ -383,7 +410,8 @@ class ETKASS:
                         event
                     )
 
-                # If patient becomes active, add to active list,
+                # If patient becomes active, add to active list.
+                # If inactive, pop from active list.
                 if (
                     not self.active_lists.is_active(event.identifier) and
                     self.patients[event.identifier].active
@@ -397,77 +425,142 @@ class ETKASS:
                         event.identifier
                     )
 
-
             elif event.type_event == cn.DON:
                 donor = self.donors[event.identifier]
                 donor_dict = donor.__dict__
 
-                # Construct an MatchList with all patients
-                # that are BG-compatible, have an active status,
-                # and a first MELD score
-                match_list = MatchListCurrentETKAS(
-                    patients=(
-                        p for p in self.get_active_list(donor_dict[cn.D_BLOODGROUP]) if (
-                            (
-                                donor_dict[cn.D_DCD] == 0 or p.dcd_country
-                            )
-                        )
-                    ),
-                    donor=donor,
-                    match_date=(
-                        self.sim_start_date +
-                        timedelta(days=self.sim_time)
-                        ),
-                    sim_start_date=self.sim_start_date,
-                    hla_system=self.hla_system,
-                    bal_system=self.bal_system,
-                    calc_points=self.sim_set.calc_score,
-                    store_score_components=False,
-                    initialize_unacceptable_mrs=self.init_unacc_mrs
+                current_date: datetime = (
+                    self.sim_start_date + timedelta(days=self.sim_time)
                 )
 
-                # Now determine which patient accepts the organ
-                accepted_mr = (
-                    self.acceptance_module.simulate_liver_allocation(
-                        match_list
-                    )
-                )
-
-                # Save match list.
-                if self.sim_set.SAVE_MATCH_LISTS:
-                    self.sim_results.save_match_list(
-                        match_list
-                    )
-
-                if accepted_mr:
-
-                    # Set patient who accepted the organ to transplanted.
-                    accepted_mr.patient.set_transplanted(
-                        tx_date=(
-                            self.sim_start_date +
-                            timedelta(days=self.sim_time)
+                # ESP-allocation. First do ESP allocation, then continue with rescue allocation
+                if donor.__dict__[cn.DONOR_AGE] >= self.age_esp:
+                    match_list_esp = MatchListESP(
+                        patients=(
+                            p for p in self.get_active_list(
+                                donor_dict[cn.D_BLOODGROUP]
+                            ) if (
+                                (
+                                    donor_dict[cn.D_DCD] == 0 or p.dcd_country
+                                ) and
+                                p.get_esp_eligible(s=self.sim_time)
+                            ) and
+                            not p.am
                         ),
                         donor=donor,
-                        match_record=accepted_mr,
-                        sim_results=self.sim_results
-                    )
-                    self.active_lists.pop_from_active_lists(
-                        accepted_mr.patient.id_registration
+                        match_date=current_date,
+                        sim_start_date=self.sim_start_date,
+                        hla_system=self.hla_system,
+                        bal_system=self.bal_system,
+                        calc_points=self.sim_set.calc_esp_score,
+                        store_score_components=False
                     )
 
-                    # Simulate post-transplant survival, i.e. simulate
-                    # patient / graft failure, and add a synthetic
-                    # reregistration if graft fails before end
-                    # of simulation period.
-                    if self.sim_set.SIM_RETX:
-                        self.simulate_posttxp(
-                            txp=accepted_mr
+                     # Now determine which patient accepts the organ
+                    accepted_mrs_esp = self.acceptance_module.simulate_esp_allocation(
+                        match_list_esp,
+                        n_kidneys_available=donor.__dict__[cn.N_KIDNEYS_AVAILABLE]
+                    )
+                    if self.sim_set.SAVE_MATCH_LISTS:
+                        self.sim_results.save_match_list(match_list_esp)
+
+                    if accepted_mrs_esp:
+                        for mr in accepted_mrs_esp:
+                            self.process_accepted_mr(
+                                accepted_mr=mr,
+                                current_date=current_date,
+                                donor=donor
+                            )
+                        n_accepted_esp = sum(
+                            2 if mr.__dict__[cn.ENBLOC]
+                            else 1
+                            for mr in accepted_mrs_esp
                         )
-
+                    else:
+                        n_accepted_esp = 0
                 else:
-                    self.sim_results.save_discard(
-                        matchl_=match_list
+                    match_list_esp = None
+                    n_accepted_esp = 0
+
+                if (donor.__dict__[cn.N_KIDNEYS_AVAILABLE] - n_accepted_esp) > 0:
+                    # Allocation via ETKAS. Construct an match-list with all patients
+                    # that are ETKAS eligible, not AM, and in the same blood type.
+                    match_list_etkas = MatchListCurrentETKAS(
+                        patients=(
+                            p for p in self.get_active_list(
+                                donor_dict[cn.D_BLOODGROUP]
+                            ) if (
+                                (
+                                    donor_dict[cn.D_DCD] == 0 or p.dcd_country
+                                ) and
+                                p.get_etkas_eligible(s=self.sim_time) and
+                                not p.am
+                            )
+                        ),
+                        donor=donor,
+                        match_date=current_date,
+                        sim_start_date=self.sim_start_date,
+                        hla_system=self.hla_system,
+                        bal_system=self.bal_system,
+                        calc_points=self.sim_set.calc_etkas_score,
+                        store_score_components=False
+                    )
+
+                    if donor.__dict__[cn.DONOR_AGE] >= self.age_esp:
+                        match_list_etkas._initialize_extalloc_priorities()
+
+                    # Now determine which patient accepts the organ
+                    accepted_mrs_etkas = (
+                        self.acceptance_module.simulate_etkas_allocation(
+                            match_list_etkas,
+                            n_kidneys_available=(
+                                donor.__dict__[cn.N_KIDNEYS_AVAILABLE] - n_accepted_esp
+                            )
                         )
+                    )
+
+                    # Donors of ESP-age are allocated in extended allocation.
+                    # We do not trigger rescue allocation for these ESP-aged
+                    # donors imm., but give national / regional priority. This is
+                    # a 2014 recommendation, implemented in 2021.
+                    if self.sim_set.SAVE_MATCH_LISTS:
+                        self.sim_results.save_match_list(match_list_etkas)
+
+                    if accepted_mrs_etkas:
+                        for mr in accepted_mrs_etkas:
+                            self.process_accepted_mr(
+                                accepted_mr=mr,
+                                current_date=current_date,
+                                donor=donor
+                            )
+                        n_accepted_etkas = len(accepted_mrs_etkas)
+                    else:
+                        n_accepted_etkas = 0
+                else:
+                    match_list_etkas = None
+                    n_accepted_etkas = 0
+
+                # TODO: delete this piece of code.
+                if debug_id_donor is not None:
+                    if donor.__dict__[cn.ID_DONOR] == debug_id_donor:
+                        if match_list_esp:
+                            print(match_list_esp)
+                        if match_list_etkas:
+                            print(match_list_etkas)
+
+                if (n_discards := donor.__dict__[cn.N_KIDNEYS_AVAILABLE] - n_accepted_etkas - n_accepted_esp) != 0:
+                    match_records = []
+                    if match_list_esp is not None and len(match_list_esp) > 0:
+                        match_records += match_list_esp.return_match_list()
+                    if match_list_etkas is not None and len(match_list_etkas) > 0:
+                        match_records += match_list_etkas.return_match_list()
+
+                    if match_records is not None:
+                        self.sim_results.save_discard(
+                            donor=donor,
+                            matchl_=match_records,
+                            n_discarded=n_discards
+                            )
             else:
                 raise ValueError(
                     f"{event.type_event} is not a valid event type."
@@ -476,6 +569,46 @@ class ETKASS:
             "--- Finished simulation in {0} seconds ---" .
             format(round_to_decimals(time.time() - start_time, 1))
         )
+
+
+    def process_accepted_mr(
+            self,
+            current_date: datetime,
+            donor: Donor,
+            accepted_mr: 'AllocationSystem.MatchRecord'
+    ):
+        #' Process an accepted match record. For this, we first simulate whether
+        #' the transplant is an en bloc transplantation.
+        accepted_mr.patient.set_transplanted(
+            tx_date=current_date,
+            donor=donor,
+            match_record=accepted_mr,
+            sim_results=self.sim_results
+        )
+        self.active_lists.pop_from_active_lists(
+            accepted_mr.patient.id_registration
+        )
+
+        # Add transplantation to balance if it is international
+        if accepted_mr.__dict__[cn.ALLOCATION_INT]:
+            self.bal_system.add_balance_from_txp(
+                rcrd=accepted_mr.__dict__,
+                txp_time=self.sim_time,
+                expiry_time=self.sim_time + self.sim_set.WINDOW_FOR_BALANCE
+        )
+
+        # Simulate post-transplant survival, i.e. simulate
+        # patient / graft failure, and add a synthetic
+        # reregistration if graft fails before end
+        # of simulation period.
+        if self.sim_set.SIM_RETX:
+            if hasattr(accepted_mr, '_initialize_posttxp_information'):
+                accepted_mr._initialize_posttxp_information(
+                    ptp=self.ptp
+                )
+            self.simulate_posttxp(
+                txp=accepted_mr
+            )
 
 
     def simulate_posttxp(self, txp: 'AllocationSystem.MatchRecord'):
@@ -500,7 +633,7 @@ class ETKASS:
             cens_date=self.sim_set.SIM_END_DATE,
             matchr_=txp,
             rereg_id=(
-                (
+                int(
                     self.ptp.offset_ids_transplants +
                     self.ptp.synth_regs
                 )

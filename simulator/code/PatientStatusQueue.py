@@ -9,7 +9,7 @@ Created on 16-08-2022
 import heapq
 from simulator.code.StatusUpdate import StatusUpdate, ProfileUpdate
 import simulator.magic_values.magic_values_rules as mgr
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Tuple
 
 import simulator.magic_values.column_names as cn
 import simulator.magic_values.etkass_settings as es
@@ -32,7 +32,7 @@ class PatientStatusQueue:
             self.events = []
 
     def remove_status_types(
-            self, remove_event_types: List[str]
+            self, remove_event_types: Tuple[str]
     ) -> None:
         """Remove certain status types"""
         self.events = [

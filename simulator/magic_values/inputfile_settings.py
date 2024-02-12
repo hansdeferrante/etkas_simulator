@@ -92,7 +92,6 @@ DTYPE_OFFERLIST = {
     cn.ACTION_CODE_DESC: 'object',
     cn.FINAL_REC_URG_AT_TRANSPLANT: 'object',
     cn.MATCH_COMMENT: 'object',
-    cn.TYPE_TRANSPLANTED: 'str',
     cn.PATIENT_HLA_LITERAL: 'str',
     cn.D_HLA_FULL: 'str',
     cn.POINTS_WAIT: 'float64',
@@ -130,7 +129,8 @@ DTYPE_PATIENTLIST = {
     cn.R_AGE_LISTING: float,
     cn.PATIENT_HLA: str,
     cn.PREVIOUS_T: 'Int64',
-    cn.KIDNEY_PROGRAM: str
+    cn.KIDNEY_PROGRAM: str,
+    cn.DATE_FIRST_DIAL: 'object'
 }
 
 DTYPE_DONORLIST = {
@@ -152,23 +152,28 @@ DTYPE_DONORLIST = {
     cn.D_MENINGITIS: 'Int64',
     cn.D_MALIGNANCY: 'Int64',
     cn.D_DRUG_ABUSE: 'Int64',
-    cn.D_MARGINAL: 'Int64',
     cn.D_DCD: 'Int64',
     cn.D_EUTHANASIA: 'Int64',
     cn.DONOR_HLA: 'str',
-    cn.DONOR_DEATH_CAUSE_GROUP: str,
+    cn.DEATH_CAUSE_GROUP: str,
     cn.D_TUMOR_HISTORY: 'Int64',
     cn.D_MARGINAL_FREE_TEXT: 'Int64',
     cn.D_SEX: str,
     cn.D_SMOKING: 'Int64',
+    cn.N_KIDNEYS_AVAILABLE: 'Int64',
     #cn.D_ALCOHOL_ABUSE: 'Int64',
-    cn.D_DIABETES: 'Int64'
+    cn.D_DIABETES: 'Int64',
+    cn.D_HYPERTENSION: 'Int64',
+    cn.D_SMOKING: 'Int64',
+    cn.D_LAST_CREAT: 'float64',
+    cn.D_CARREST: 'Int64',
+    cn.D_RESCUE: 'Int64'
 }
 
 
 DTYPE_DONORBALLIST = {
     cn.D_DATE: object,
-    cn.D_COUNTRY: str,
+    cn.D_ALLOC_COUNTRY: str,
     cn.D_ALLOC_CENTER: str,
     cn.D_AGE: int,
     cn.D_BLOODGROUP: str,
@@ -185,7 +190,6 @@ DTYPE_DONOR_FILL_NAS = {
     cn.D_MENINGITIS: 0,
     cn.D_MALIGNANCY: 0,
     cn.D_DRUG_ABUSE: 0,
-    cn.D_MARGINAL: 0,
     cn.D_DCD: 0,
     cn.D_EUTHANASIA: 0,
     cn.D_RESCUE: 0,
@@ -209,22 +213,22 @@ DTYPE_DIAGS = {
 DTYPE_PROFILES = {
     cn.ID_REGISTRATION: int,
     cn.TSTART: float,
-    cn.PROFILE_MIN_DONOR_AGE: int,
-    cn.PROFILE_MAX_DONOR_AGE: int,
-    cn.PROFILE_DCD: bool,
-    cn.PROFILE_HBSAG: bool,
-    cn.PROFILE_HCVAB: bool,
-    cn.PROFILE_HBCAB: bool,
-    cn.PROFILE_SEPSIS: bool,
-    cn.PROFILE_MENINGITIS: bool,
-    cn.PROFILE_MALIGNANCY: bool,
-    cn.PROFILE_DRUG_ABUSE: bool,
-    cn.PROFILE_RESCUE: bool,
-    cn.PROFILE_EUTHANASIA: bool
+    cn.PROFILE_MIN_DONOR_AGE: 'Int64',
+    cn.PROFILE_MAX_DONOR_AGE: 'Int64',
+    cn.PROFILE_DCD: 'Int64',
+    cn.PROFILE_HBSAG: 'Int64',
+    cn.PROFILE_HCVAB: 'Int64',
+    cn.PROFILE_HBCAB: 'Int64',
+    cn.PROFILE_SEPSIS: 'Int64',
+    cn.PROFILE_MENINGITIS: 'Int64',
+    cn.PROFILE_MALIGNANCY: 'Int64',
+    cn.PROFILE_DRUG_ABUSE: 'Int64',
+    cn.PROFILE_RESCUE: 'Int64',
+    cn.PROFILE_EUTHANASIA: 'Int64'
 }
 DTYPE_PROFILES.update(
     {
-        v: int for v in es.PROFILE_HLA_MQS.values()
+        v: 'Int64' for v in es.PROFILE_HLA_MQS.values()
     }
 )
 
@@ -252,12 +256,3 @@ DTYPE_OFFERLIST = {
     k, v in DTYPE_OFFERLIST.items()
     }
 
-DTYPE_ACOS = {
-    k.upper(): v for
-    k, v in DTYPE_ACOS.items()
-    }
-
-DTYPE_PROFILES = {
-    k.upper(): v for
-    k, v in DTYPE_PROFILES.items()
-    }

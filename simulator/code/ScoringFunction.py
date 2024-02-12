@@ -62,10 +62,11 @@ class MatchPointFunction:
     ) -> None:
         self.intercept = intercept
         self.coef = {k.lower(): fl for k, fl in coef.items()}
-        self.interactions = tuple(
-            key for key in self.coef.keys()
+        self.interactions = {
+            key: key.split(':')
+            for key in self.coef.keys()
             if ':' in key
-        )
+        }
         self.trafos = trafos
         self.caps = caps
 
@@ -78,8 +79,7 @@ class MatchPointFunction:
 
     def add_interactions(self, d: Dict[str, Any]) -> None:
         d[cn.INTERCEPT] = 1
-        for inter in self.interactions:
-            var1, var2 = inter.split(':')
+        for inter, (var1, var2) in self.interactions.items():
             d[inter] = d[var1] * d[var2]
 
 
@@ -97,12 +97,24 @@ class MatchPointFunction:
         for key, coef in self.coef.items():
             if (value := match_record[key]) > 0:
                 score += value*coef
-
         if self.round:
             return round_to_int(score)
-
         return score
 
+    def calc_patient_score(
+        self,
+        pd: dict[str, Any]
+    ) -> float:
+
+        # Calculate score. This is faster with a for-loop than
+        # list comprehension.
+        score=0
+        for key, coef in self.coef.items():
+            if key in pd and pd[key] and pd[key] > 0:
+                score += pd[key]*coef
+        if self.round:
+            return round_to_int(score)
+        return score
 
     def calc_score_components(
             self,

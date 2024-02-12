@@ -18,19 +18,25 @@ import simulator.magic_values.column_groups as cg
 import simulator.magic_values.magic_values_rules as mr
 from functools import reduce
 from operator import or_
-from itertools import product
+from itertools import product, combinations
 
 DAYS_PER_YEAR = timedelta(days=365.25)
 DEFAULT_DATE_TIME = '%Y-%m-%d %H:%M:%S'
 
 READ_CSV_ENGINE = 'pyarrow'
 
-DEFAULT_ATTR_ORDER = (
+DEFAULT_ETKAS_ATTR_ORDER = (
     cn.MTCH_TIER,
     cn.TOTAL_MATCH_POINTS,
     cn.MM_TOTAL,
-    cn.YEARS_ON_DIAL,
-    cn.ID_RECIPIENT
+    cn.YEARS_ON_DIAL#,  # Sorting on ID recipient is irrelevant; YEARS_ON_DIAL is a float, so no ties possible.
+    #cn.ID_RECIPIENT
+)
+
+DEFAULT_ESP_ATTR_ORDER = (
+    cn.ESP_PRIORITY,
+    cn.PATIENT_IS_HU,
+    cn.TOTAL_MATCH_POINTS
 )
 
 AGE_ESP_ELIGIBLE = 65
@@ -42,6 +48,11 @@ HLA_MQS = list(
         range(3)
     )
 )
+
+MISMATCH_STR_DEFINITION = (
+    mr.MMB_HLA_A, mr.MMB_HLA_B, mr.MMS_HLA_DR
+)
+
 HLA_MQS_STR = list(
     ''.join((str(i) for i in item)) for item in HLA_MQS
 )
@@ -73,9 +84,10 @@ DIR_POSTTXP_COEFS = 'simulator/magic_values/post_txp/'
 DIR_TEST_LR = 'data/test/'
 
 # Path to rescue probs
-PATH_RESCUE_PROBABILITIES = (
-    'simulator/magic_values/probabilities_rescue_triggered.csv'
-)
+PATHS_RESCUE_PROBABILITIES = {
+    mgr.ESP: 'simulator/magic_values/probabilities_rescue_triggered_ESP.csv',
+    mgr.ETKAS: 'simulator/magic_values/probabilities_rescue_triggered_ETKAS.csv'
+}
 
 # Paths to files with travel information
 PATH_DRIVING_DISTANCE = (
@@ -96,49 +108,38 @@ MAX_DRIVE_KM: float = 300
 # Paths relevant for the acceptance module
 ACCEPTANCE_PATHS = {
     k: DIR_ACCEPTANCE_COEFS + v for k, v in {
-        'rd': 'coefs_recipient_driven.csv'
+        'rd': 'coefs_recipient_driven.csv',
+        'cd': 'coefs_center_and_obligations.csv',
+        'enbloc': 'coefs_enbloc.csv'
     }.items()
 }
 LR_TEST_FILES = {
     k: DIR_TEST_LR + v for k, v in {
         'rd': 'acceptance_pd.csv',
+        'cd': 'acceptance_cd.csv',
+        'enbloc': 'test_cases_enbloc.csv'
     }.items()
 }
 
 # Paths relevant for post-transplant survival predictions
-POSTTXP_RELISTPROB_PATHS = {
-    k: DIR_POSTTXP_COEFS + v for k, v in {
-        cn.T: 'prob_relist_T.csv',
-        cn.HU: 'prob_relist_HU.csv'
-    }.items()
-}
-POSTTXP_SURV_PATHS = {
-    k: DIR_POSTTXP_COEFS + v for k, v in {
-        cn.T: 'posttx_coefs_T.csv',
-        cn.HU: 'posttx_coefs_HU.csv'
-    }.items()
-}
-POSTTXP_DEATHPROBS_PATHS = {
-    k: DIR_POSTTXP_COEFS + v for k, v in {
-        cn.T: 'posttx_fracdeath_T.csv',
-        cn.HU: 'posttx_fracdeath_HU.csv'
-    }.items()
-}
-POSTTXP_SURV_TESTPATHS = {
-    k: DIR_TEST_LR + v for k, v in {
-        cn.T: 'posttx_testcases_T.csv',
-        cn.HU: 'posttx_testcases_HU.csv'
-    }.items()
-}
+POSTTXP_RELISTPROB_PATHS = {None: DIR_POSTTXP_COEFS + 'prob_relist.csv'}
+POSTTXP_SURV_PATHS = {None: DIR_POSTTXP_COEFS + 'posttx_coefs.csv'}
+POSTTXP_DEATHPROBS_PATHS ={None: DIR_POSTTXP_COEFS + 'posttx_fracdeath.csv'}
+POSTTXP_SURV_TESTPATHS = {None: DIR_TEST_LR + 'posttx_testcases.csv'}
 
 OFFER_INHERIT_COLS = {
     'donor': [
-        cn.D_AGE, cn.DONOR_DEATH_CAUSE_GROUP,
+        cn.D_AGE, cn.DEATH_CAUSE_GROUP,
         cn.D_TUMOR_HISTORY, cn.D_MARGINAL_FREE_TEXT,
-        cn.D_DCD, cn.D_DIABETES, cn.RESCUE
+        cn.D_DCD, cn.D_DIABETES, cn.D_HYPERTENSION, cn.D_LAST_CREAT,
+        cn.D_CARREST, cn.D_HBSAG, cn.D_HCVAB, cn.D_AGE,
+        cn.D_HBCAB, cn.D_DIABETES, cn.D_HYPERTENSION,
+        cn.D_LAST_CREAT, cn.D_TUMOR_HISTORY, cn.D_SMOKING,
+        cn.DONOR_COUNTRY
     ],
     'patient': [
-        cn.PATIENT_SEX, cn.URGENCY_CODE, cn.IS_RETRANSPLANT, cn.R_PED
+        cn.PATIENT_SEX, cn.URGENCY_CODE, cn.IS_RETRANSPLANT, cn.R_PED,
+        cn.PATIENT_COUNTRY, cn.RECIPIENT_COUNTRY, cn.VPRA
     ]
 }
 
@@ -146,12 +147,12 @@ OFFER_INHERIT_COLS = {
 POSTTXP_DISCRETE_MATCH_VARS = [cn.REREG_RETURN_DIAL_TIME, cn.RECIPIENT_COUNTRY]
 POSTTXP_CONTINUOUS_MATCH_VARS = {
     cn.RETRANSPLANT: [
-        cn.AGE_PREV_TXP, cn.TIME_SINCE_PREV_TXP, cn.TIME_LIST_TO_REALEVENT
+        cn.AGE_PREV_TXP, cn.TIME_SINCE_PREV_TXP, cn.TIME_LIST_TO_REALEVENT, cn.YEARS_ON_DIAL
     ],
-    cn.OFFER: [cn.R_MATCH_AGE, cn.TIME_TO_REREG, cn.TIME_LIST_TO_REALEVENT]
+    cn.OFFER: [cn.R_MATCH_AGE, cn.TIME_TO_REREG, cn.TIME_LIST_TO_REALEVENT, cn.YEARS_ON_DIAL]
 }
 POSTTXP_MIN_MATCHES = 5
-POSTTXP_MATCH_CALIPERS = [20.0, 1.0, 1.0]
+POSTTXP_MATCH_CALIPERS = [20.0, 2.0, 1.0, 3]
 
 
 def log_ceil(x):
@@ -161,11 +162,10 @@ def log_ceil(x):
 POSTTXP_TRANSFORMATIONS = [identity, log_ceil, log_ceil]
 
 POSTTXP_COPY_VARS = [
-    cn.ID_RECIPIENT, cn.R_BLOODGROUP, cn.R_WEIGHT,
-    cn.R_HEIGHT, cn.RECIPIENT_CENTER,
-    cn.RECIPIENT_COUNTRY, cn.RECIPIENT_REGION,
-    cn.R_DOB, cn.PATIENT_SEX,
-    'profile'
+    cn.PATIENT_COUNTRY, cn.RECIPIENT_CENTER, cn.RECIPIENT_COUNTRY, cn.RECIPIENT_REGION,
+    cn.ID_RECIPIENT, cn.R_BLOODGROUP, cn.R_DOB, cn.PATIENT_SEX,
+    'profile', cn.PATIENT_FEMALE, 'hla', 'hla_broads', 'hla_splits',
+     cn.VPRA, cn.ET_HLA_MISMATCHFREQ
 ]
 
 hlas_to_load = (
@@ -235,7 +235,7 @@ OUTPUT_COLS_DISCARDS = (
     cn.TYPE_OFFER_DETAILED
 )
 OUTPUT_COLS_PATIENTS = (
-    cn.ID_RECIPIENT, cn.ID_REGISTRATION,
+    cn.ID_RECIPIENT, cn.ID_REGISTRATION, cn.R_PED,
     cn.RECIPIENT_CENTER, cn.LISTING_DATE,
     cn.EXIT_STATUS, cn.EXIT_DATE, cn.URGENCY_REASON,
     cn.FINAL_REC_URG_AT_TRANSPLANT,
@@ -251,25 +251,34 @@ OUTPUT_COLS_PATIENTS = (
     cn.DISEASE_SINCE,
     cn.DISEASE_GROUP,
     cn.URGENCY_CODE,
-    cn.R_HEIGHT
+    cn.VPRA,
+    cn.ET_MMP,
+    cn.ET_HLA_MISMATCHFREQ,
+    cn.HLA_MISMATCHFREQ,
+    cn.HZ_HLA_A, cn.HZ_HLA_B, cn.HZ_HLA_DR
 )
 OUTPUT_COLS_EXITS = (
-    cn.ID_RECIPIENT, cn.ID_REGISTRATION,
-    cn.TYPE_RETX, cn.ID_DONOR, cn.D_DCD, cn.EXIT_STATUS,
-    cn.URGENCY_REASON, cn.LISTING_DATE,
-    cn.EXIT_DATE, cn.MATCH_CRITERIUM, cn.GEOGRAPHY_MATCH,
+    cn.ID_RECIPIENT, cn.ID_REGISTRATION, cn.URGENCY_CODE,
+    cn.TYPE_RETX, cn.ID_DONOR, cn.DONOR_AGE,
+    cn.D_DCD, cn.EXIT_STATUS, cn.URGENCY_REASON,
+    cn.LISTING_DATE, cn.EXIT_DATE, cn.MATCH_CRITERIUM, cn.GEOGRAPHY_MATCH,
     cn.MATCH_ABROAD, cn.RECIPIENT_CENTER,
     cn.RECIPIENT_COUNTRY, cn.R_BLOODGROUP, cn.D_BLOODGROUP,
     cn.MATCH_DATE, cn.PATIENT_RANK,
     cn.RANK, cn.D_ALLOC_CENTER, cn.D_ALLOC_COUNTRY,
     cn.R_MATCH_AGE, cn.R_PED,
     cn.PATIENT_IS_HU,
-    cn.TYPE_TRANSPLANTED, cn.PATIENT_SEX,
+    cn.PATIENT_SEX,
     cn.ANY_HU, cn.ACCEPTANCE_REASON,
     cn.OFFERED_TO, cn.DISEASE_GROUP, cn.DISEASE_SINCE,
     cn.PROFILE_COMPATIBLE, cn.TYPE_OFFER_DETAILED,
-    cn.PROB_ACCEPT_C, cn.PROB_ACCEPT_P, cn.DRAWN_PROB, cn.DRAWN_PROB_C
- ) + tuple(cg.MTCH_COLS) + tuple(COLS_TRANSPLANT_PROBS)
+    cn.PROB_ACCEPT_C, cn.PROB_ACCEPT_P, cn.DRAWN_PROB, cn.DRAWN_PROB_C,
+    cn.PROB_ENBLOC, cn.ENBLOC,
+    cn.TYPE_RECORD, cn.VPRA, cn.ET_MMP, cn.HLA_MISMATCHFREQ,
+    cn.ET_HLA_MISMATCHFREQ, cn.HZ_HLA_A, cn.HZ_HLA_B, cn.HZ_HLA_DR,
+    cn.EXT_ALLOC_PRIORITY, cn.EXT_ALLOC_TRIGGERED,
+    cn.ALLOCATION_MECHANISM, cn.ALLOCATION_PROGRAM
+ ) + tuple(cg.MTCH_COLS) + tuple(COLS_TRANSPLANT_PROBS) + tuple(MISMATCH_STR_DEFINITION)
 OUTPUT_COLS_EXIT_CONSTRUCTED = (
     cn.ID_REREGISTRATION, cn.TIME_WAITED
 )
@@ -284,22 +293,23 @@ MATCH_INFO_COLS = (
     cn.LISTING_DATE, cn.RECIPIENT_COUNTRY, cn.R_BLOODGROUP,
     cn.D_BLOODGROUP, cn.BG_PRIORITY, cn.R_MATCH_AGE, cn.R_WEIGHT,
     cn.R_PED, cn.MATCH_CRITERIUM, cn.GEOGRAPHY_MATCH,
-    cn.DONOR_DEATH_CAUSE_GROUP, cn.D_TUMOR_HISTORY,
+    cn.DEATH_CAUSE_GROUP, cn.D_TUMOR_HISTORY,
     cn.PATIENT_SEX, cn.PATIENT_RANK, cn.RANK, cn.ACCEPTED,
     cn.ACCEPTANCE_REASON, cn.PROB_ACCEPT_C, cn.PROB_ACCEPT_P, cn.DRAWN_PROB,
-    cn.DRAWN_PROB_C, cn.PROFILE_COMPATIBLE, cn.D_HEIGHT, cn.R_HEIGHT
+    cn.DRAWN_PROB_C, cn.PROFILE_COMPATIBLE,
+    cn.VPRA, cn.ET_MMP, cn.ET_HLA_MISMATCHFREQ, cn.HLA_MISMATCHFREQ,
+    cn.HZ_HLA_A, cn.HZ_HLA_B, cn.HZ_HLA_DR
 ) + tuple(cg.MTCH_COLS)
-
-MATCH_INFO_COLS_SET = set(MATCH_INFO_COLS)
 
 
 # Cut-off for transplantation, where candidate's reregistration time is returned
-CUTOFF_REREG_RETURN_DIAL_TIME = 90
+CUTOFF_REREG_RETURN_DIAL_TIME = 365
 
 # Add type statuses
 STATUS_TYPES = set(
     (mgr.URG, mgr.FU, mgr.PRF, mgr.DIAG, mgr.HLA, mgr.UNACC, mgr.AM, mgr.DIAL)
 )
+STATUS_TYPES_TO_REMOVE = (mgr.PRF, mgr.DIAG, mgr.HLA, mgr.UNACC, mgr.AM, mgr.DIAL)
 
 # Event types
 EVENT_TYPES = [cn.PAT, cn.DON]
@@ -318,11 +328,6 @@ TIERS_HUACO_SPLIT = [cn.TIER_B, cn.TIER_C, cn.TIER_E, cn.TIER_F]
 # Implemented acceptance module policies
 PATIENT_ACCEPTANCE_POLICIES = ['Always', 'LR']
 CENTER_ACCEPTANCE_POLICIES = ['Always', 'LR']
-
-# By which group to calculate MMAT
-MMAT_GROUPING_VAR = 'recipient_country'
-MMAT_TIME_HORIZON = 365
-MMAT_MIN_MELD = 18
 
 
 # Required donor and patient information for match records
@@ -349,11 +354,6 @@ MATCH_TO_BROADS = {
 MATCH_TO_SPLITS = {
     v: f'mms_{v}' for v in mr.HLA_LOCI
 }
-
-
-MISMATCH_STR_DEFINITION = (
-    mr.MMB_HLA_A, mr.MMB_HLA_B, mr.MMS_HLA_DR
-)
 
 POINT_GROUPS = {
     cn.POINTS_HLA: (cn.INTERCEPT, mr.MMB_HLA_A, mr.MMB_HLA_B, mr.MMS_HLA_DR),
