@@ -15,6 +15,7 @@ import pandas as pd
 import typing
 import gzip
 import shutil
+import pathlib
 
 from simulator.magic_values.rules import check_etkas_ped_rec
 from simulator.code.utils import round_to_decimals
@@ -129,7 +130,10 @@ class SimResults:
                 else:
                     result_dict[cn.ALLOCATION_MECHANISM] = f'{mgr.ETKAS}_EA'
             else:
-                result_dict[cn.ALLOCATION_MECHANISM] = f'{mgr.ETKAS}_REGULAR'
+                if result_dict[cn.URGENCY_CODE] == mgr.HU:
+                    result_dict[cn.ALLOCATION_MECHANISM] = f'{mgr.ETKAS}_HU'
+                else:
+                    result_dict[cn.ALLOCATION_MECHANISM] = f'{mgr.ETKAS}_REGULAR'
         else:
             print(f'Warning: unknown allocation mechanism? ({result_dict[cn.ALLOCATION_PROGRAM]} program)')
 
@@ -536,23 +540,35 @@ class SimResults:
     def match_lists_to_file(
             self,
             file: Optional[str] = None,
-            compression: Optional[str] = None
+            compression: Optional[str] = None,
+            write_all: Optional[bool] = False
     ) -> None:
         """Save match lists to file"""
         file = file if file else self.path_ml
         if compression:
             if isinstance(file, str) and not file.endswith(compression):
                 file += f'.{compression}'
+
         data_ = self.return_all_matchlists()
+        if not write_all:
+            data_ = data_.loc[
+                (data_.loc[:, cn.ACCEPTANCE_REASON] != 'FP') &
+                data_.loc[:, cn.ACCEPTANCE_REASON].notna(),
+                :
+            ]
+
         outdir = os.path.dirname(file)
         if not os.path.exists(outdir):
             os.makedirs(outdir)
+
+        csvfile = pathlib.Path(file)
         data_.to_csv(
             path_or_buf=file,
             mode='a',
             compression=compression,
             index=False,
-            date_format=DEFAULT_DMY_HMS_FORMAT
+            date_format=DEFAULT_DMY_HMS_FORMAT,
+            header=not csvfile.exists()
         )
 
     def balance_points_to_file(

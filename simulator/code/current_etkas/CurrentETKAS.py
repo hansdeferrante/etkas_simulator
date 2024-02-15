@@ -11,11 +11,9 @@ import simulator.magic_values.magic_values_rules as mgr
 from simulator.code.PostTransplantPredictor import PostTransplantPredictor
 from simulator.code.AllocationSystem import MatchList, MatchRecord
 from simulator.code.entities import Patient, Donor, HLASystem, BalanceSystem, Profile
-from simulator.code.utils import RuleTuple, round_to_decimals
+from simulator.code.utils import round_to_decimals
 from simulator.code.ScoringFunction import MatchPointFunction
 from simulator.magic_values.rules import (
-    BLOOD_GROUP_COMPATIBILITY_DICT,
-    DICT_CENTERS_TO_REGIONS,
     DICT_ESP_SUBREGIONS,
     check_etkas_ped_don,
     check_etkas_ped_rec
@@ -106,7 +104,7 @@ class MatchRecordCurrentETKAS(MatchRecord):
 
         # Determine whether patient is pediatric.
         self._determine_pediatric()
-        self._determine_match_criterium()
+        self._determine_match_distance()
 
         # Determine years the patient has been on dialysis
         if (dial_time := self.patient.get_dial_time_sim_start()) is not None:
@@ -156,6 +154,7 @@ class MatchRecordCurrentETKAS(MatchRecord):
             self.total_match_points = sum(
                 self.sc.values()
             )
+            self.__dict__.update(self.sc)
         else:
             self.total_match_points = calc_points.calc_score(
                 self.__dict__
@@ -214,6 +213,14 @@ class MatchRecordCurrentETKAS(MatchRecord):
 
     def _initialize_acceptance_information(self) -> None:
 
+        # Initialize travel times
+        if self.center_travel_times:
+            self.__dict__.update(
+                self.center_travel_times[
+                    self.__dict__[cn.RECIPIENT_CENTER]
+                ]
+            )
+
         # Copy over patient and donor information, needed for acceptance.
         self.__dict__.update(self.donor.offer_inherit_cols)
         self.__dict__.update(self.patient.offer_inherit_cols)
@@ -254,7 +261,7 @@ class MatchRecordCurrentETKAS(MatchRecord):
         else:
             self.__dict__[cn.TIME_SINCE_PREV_TXP_CAT] = 'over3years'
 
-        # self._calculate_posttxp_survival(ptp=ptp)
+        self._calculate_posttxp_survival(ptp=ptp)
 
     def _calculate_posttxp_survival(
         self, ptp: PostTransplantPredictor
@@ -292,74 +299,16 @@ class MatchRecordCurrentETKAS(MatchRecord):
             self.__dict__[cn.D_PED] = self.donor.__dict__[cn.D_PED]
 
 
-    def _determine_match_criterium(self):
-        """Determine match criterium for allocation"""
-        self_dict = self.__dict__
-        pat_dict = self.patient.__dict__
-
-        if (
-            pat_dict[cn.RECIPIENT_COUNTRY] !=
-            self_dict[cn.D_ALLOC_COUNTRY]
-        ):
-            self_dict[cn.MATCH_CRITERIUM] = cn.INT
-            self_dict[cn.GEOGRAPHY_MATCH] = cn.A
-            self_dict[cn.ALLOCATION_LOC] = False
-            self_dict[cn.ALLOCATION_REG] = False
-            self_dict[cn.ALLOCATION_NAT] = False
-            self_dict[cn.ALLOCATION_INT] = True
-        else:
-            if (
-                pat_dict[cn.RECIPIENT_CENTER] ==
-                self_dict[cn.D_ALLOC_CENTER]
-            ):
-                self_dict[cn.MATCH_CRITERIUM] = cn.LOC
-                self_dict[cn.ALLOCATION_LOC] = True
-                if self_dict[cn.D_ALLOC_COUNTRY] == mgr.GERMANY:
-                    self_dict[cn.ALLOCATION_REG] = True
-                else:
-                    self_dict[cn.ALLOCATION_REG] = False
-                self_dict[cn.ALLOCATION_NAT] = True
-                self_dict[cn.ALLOCATION_INT] = False
-            elif (
-                pat_dict[cn.RECIPIENT_REGION] ==
-                self_dict[cn.D_ALLOC_REGION]
-            ):
-                self_dict[cn.MATCH_CRITERIUM] = cn.REG
-                self_dict[cn.ALLOCATION_LOC] = False
-                self_dict[cn.ALLOCATION_REG] = True
-                self_dict[cn.ALLOCATION_NAT] = True
-                self_dict[cn.ALLOCATION_INT] = False
-            elif (
-                pat_dict[cn.RECIPIENT_COUNTRY] ==
-                self_dict[cn.D_ALLOC_COUNTRY]
-            ):
-                self_dict[cn.MATCH_CRITERIUM] = cn.NAT
-                self_dict[cn.ALLOCATION_LOC] = False
-                self_dict[cn.ALLOCATION_REG] = False
-                self_dict[cn.ALLOCATION_NAT] = True
-                self_dict[cn.ALLOCATION_INT] = False
-            if (
-                pat_dict[cn.RECIPIENT_CENTER] ==
-                self_dict[cn.D_ALLOC_CENTER]
-            ):
-                self_dict[cn.GEOGRAPHY_MATCH] = cn.L
-            elif self_dict[cn.ALLOCATION_REG]:
-                self_dict[cn.GEOGRAPHY_MATCH] = cn.R
-            elif self_dict[cn.ALLOCATION_NAT]:
-                self_dict[cn.GEOGRAPHY_MATCH] = cn.H
-
     def _determine_extalloc_priority(self):
         """Prioritize local allocation in case of extended allocation."""
         if (
             self.__dict__[cn.RECIPIENT_COUNTRY] == mgr.GERMANY
         ):
-            if self.__dict__[cn.ALLOCATION_REG]:
+            if self.allocation_regional:
                 self.__dict__[cn.EXT_ALLOC_PRIORITY] = 1
             else:
                 self.__dict__[cn.EXT_ALLOC_PRIORITY] = 0
-        elif (
-            self.__dict__[cn.RECIPIENT_COUNTRY] == self.__dict__[cn.DONOR_COUNTRY]
-        ):
+        elif self.allocation_national:
             self.__dict__[cn.EXT_ALLOC_PRIORITY] = 1
         else:
             self.__dict__[cn.EXT_ALLOC_PRIORITY] = 0
@@ -367,21 +316,11 @@ class MatchRecordCurrentETKAS(MatchRecord):
 
     def _determine_match_abroad(self):
         """Determine match abroad"""
-
-        """if self.__dict__[cn.GEOGRAPHY_MATCH] == 'L':
-            if self.__dict__[cn.RECIPIENT_COUNTRY] == mgr.GERMANY:
-                self.__dict__[cn.MATCH_ABROAD] = 'R'
-            else:
-                self.__dict__[cn.MATCH_ABROAD] = 'H'
-        elif self.__dict__[cn.GEOGRAPHY_MATCH] == 'R':
-            if self.__dict__[cn.RECIPIENT_COUNTRY] != mgr.GERMANY:
-                self.__dict__[cn.MATCH_ABROAD] = 'H'
-            else:
-                self.__dict__[cn.MATCH_ABROAD] = 'R'
-        else:
-            self.__dict__[cn.MATCH_ABROAD] = self.__dict__[cn.GEOGRAPHY_MATCH]"""
         self.__dict__[cn.MATCH_ABROAD]: int = (
-            0 if self.__dict__[cn.PATIENT_COUNTRY] == self.__dict__[cn.DONOR_COUNTRY]
+            0 if (
+                self.__dict__[cn.PATIENT_COUNTRY] ==
+                self.__dict__[cn.DONOR_COUNTRY]
+            )
             else 1
         )
 
@@ -452,6 +391,7 @@ class MatchListCurrentETKAS(MatchList):
             sort: bool = False,
             record_class = MatchRecordCurrentETKAS,
             store_score_components: bool = False,
+            travel_time_dict: Optional[Dict[str, Any]] = None,
             *args,
             **kwargs
     ) -> None:
@@ -462,6 +402,7 @@ class MatchListCurrentETKAS(MatchList):
             record_class=record_class,
             attr_order_match=es.DEFAULT_ETKAS_ATTR_ORDER,
             store_score_components=store_score_components,
+            travel_time_dict=travel_time_dict,
             *args,
             **kwargs
             )
@@ -548,8 +489,7 @@ class MatchRecordCurrentESP(MatchRecord):
 
         self.__dict__[cn.TYPE_RECORD] = 'ESP'
 
-        # Determine whether patient is pediatric.
-        self._determine_match_criterium()
+        self._determine_match_distance()
 
         # Determine years the patient has been on dialysis
         if (dial_time := self.patient.get_dial_time_sim_start()) is not None:
@@ -578,6 +518,7 @@ class MatchRecordCurrentESP(MatchRecord):
             self.total_match_points = sum(
                 self.sc.values()
             )
+            self.__dict__.update(self.sc)
         else:
             self.total_match_points = calc_points.calc_score(
                 self.__dict__
@@ -592,6 +533,14 @@ class MatchRecordCurrentESP(MatchRecord):
         self._compatible = None
 
     def _initialize_acceptance_information(self) -> None:
+
+        # Initialize travel times to recipient centers
+        if self.center_travel_times:
+            self.__dict__.update(
+                self.center_travel_times[
+                    self.__dict__[cn.RECIPIENT_CENTER]
+                ]
+            )
 
         # Copy over patient and donor information, needed for acceptance.
         self.__dict__.update(self.donor.offer_inherit_cols)
@@ -647,26 +596,26 @@ class MatchRecordCurrentESP(MatchRecord):
     def determine_esp_priority(self):
         donor_country = self.__dict__[cn.D_ALLOC_COUNTRY]
         if donor_country == mgr.AUSTRIA:
-            if self.__dict__[cn.ALLOCATION_LOC]:
+            if self.__dict__[cn.MATCH_LOCAL]:
                 self.__dict__[cn.ESP_PRIORITY] = 1
             else:
                 self.__dict__[cn.ESP_PRIORITY] = -1
         elif donor_country == mgr.GERMANY:
             if self._same_esp_subregion():
                 self.__dict__[cn.ESP_PRIORITY] = 1
-            elif self.__dict__[cn.ALLOCATION_REG]:
+            elif self.allocation_regional:
                 self.__dict__[cn.ESP_PRIORITY] = 0
             else:
                 self.__dict__[cn.ESP_PRIORITY] = -1
         elif donor_country in {mgr.BELGIUM, mgr.HUNGARY}:
-            if self.__dict__[cn.ALLOCATION_LOC]:
+            if self.__dict__[cn.MATCH_LOCAL]:
                 self.__dict__[cn.ESP_PRIORITY] = 1
-            elif self.__dict__[cn.ALLOCATION_NAT]:
+            elif self.__dict__[cn.MATCH_NATIONAL]:
                 self.__dict__[cn.ESP_PRIORITY] = 0
             else:
                 self.__dict__[cn.ESP_PRIORITY] = -1
         else:
-            if self.__dict__[cn.ALLOCATION_NAT]:
+            if self.__dict__[cn.MATCH_NATIONAL]:
                 self.__dict__[cn.ESP_PRIORITY] = 1
             else:
                 self.__dict__[cn.ESP_PRIORITY] = -1
@@ -674,7 +623,7 @@ class MatchRecordCurrentESP(MatchRecord):
     def _same_esp_subregion(self):
         if (
             self.__dict__[cn.D_ALLOC_COUNTRY] == mgr.GERMANY and
-            self.__dict__[cn.ALLOCATION_NAT]
+            self.allocation_national
         ):
             d_ctr = self.__dict__[cn.D_ALLOC_CENTER]
             r_ctr = self.__dict__[cn.RECIPIENT_CENTER]
@@ -687,61 +636,6 @@ class MatchRecordCurrentESP(MatchRecord):
                     return True
         return False
 
-    def _determine_match_criterium(self):
-        """Determine match criterium for allocation"""
-        self_dict = self.__dict__
-        pat_dict = self.patient.__dict__
-
-        if (
-            pat_dict[cn.RECIPIENT_COUNTRY] !=
-            self_dict[cn.D_ALLOC_COUNTRY]
-        ):
-            self_dict[cn.MATCH_CRITERIUM] = cn.INT
-            self_dict[cn.GEOGRAPHY_MATCH] = cn.A
-            self_dict[cn.ALLOCATION_LOC] = False
-            self_dict[cn.ALLOCATION_REG] = False
-            self_dict[cn.ALLOCATION_NAT] = False
-            self_dict[cn.ALLOCATION_INT] = True
-        else:
-            if (
-                pat_dict[cn.RECIPIENT_CENTER] ==
-                self_dict[cn.D_ALLOC_CENTER]
-            ):
-                self_dict[cn.MATCH_CRITERIUM] = cn.LOC
-                self_dict[cn.ALLOCATION_LOC] = True
-                if self_dict[cn.D_ALLOC_COUNTRY] == mgr.GERMANY:
-                    self_dict[cn.ALLOCATION_REG] = True
-                else:
-                    self_dict[cn.ALLOCATION_REG] = False
-                self_dict[cn.ALLOCATION_NAT] = True
-                self_dict[cn.ALLOCATION_INT] = False
-            elif (
-                pat_dict[cn.RECIPIENT_REGION] ==
-                self_dict[cn.D_ALLOC_REGION]
-            ):
-                self_dict[cn.MATCH_CRITERIUM] = cn.REG
-                self_dict[cn.ALLOCATION_LOC] = False
-                self_dict[cn.ALLOCATION_REG] = True
-                self_dict[cn.ALLOCATION_NAT] = True
-                self_dict[cn.ALLOCATION_INT] = False
-            elif (
-                pat_dict[cn.RECIPIENT_COUNTRY] ==
-                self_dict[cn.D_ALLOC_COUNTRY]
-            ):
-                self_dict[cn.MATCH_CRITERIUM] = cn.NAT
-                self_dict[cn.ALLOCATION_LOC] = False
-                self_dict[cn.ALLOCATION_REG] = False
-                self_dict[cn.ALLOCATION_NAT] = True
-                self_dict[cn.ALLOCATION_INT] = False
-            if (
-                pat_dict[cn.RECIPIENT_CENTER] ==
-                self_dict[cn.D_ALLOC_CENTER]
-            ):
-                self_dict[cn.GEOGRAPHY_MATCH] = cn.L
-            elif self_dict[cn.ALLOCATION_REG]:
-                self_dict[cn.GEOGRAPHY_MATCH] = cn.R
-            elif self_dict[cn.ALLOCATION_NAT]:
-                self_dict[cn.GEOGRAPHY_MATCH] = cn.H
 
     def _determine_match_abroad(self):
         """Determine match abroad"""
@@ -818,6 +712,7 @@ class MatchListESP(MatchList):
             sort: bool = False,
             record_class = MatchRecordCurrentESP,
             store_score_components: bool = False,
+            travel_time_dict: Optional[Dict[str, Any]] = None,
             *args,
             **kwargs
     ) -> None:
@@ -828,6 +723,7 @@ class MatchListESP(MatchList):
             record_class=record_class,
             attr_order_match=es.DEFAULT_ESP_ATTR_ORDER,
             store_score_components=store_score_components,
+            travel_time_dict=travel_time_dict,
             *args,
             **kwargs
             )
@@ -840,6 +736,12 @@ class MatchListESP(MatchList):
 
         self.match_list.sort()
         self.sorted = True
+        if travel_time_dict:
+            self.center_travel_times = travel_time_dict[
+                self.donor.__dict__[cn.DONOR_CENTER]
+            ]
+        else:
+            self.center_travel_times = None
 
         for rank, match_record in enumerate(self.match_list):
             if isinstance(match_record, MatchRecordCurrentESP):

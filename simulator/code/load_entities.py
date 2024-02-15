@@ -346,11 +346,16 @@ def preload_status_updates(
     """
 
     # Read in status updates for patients
-    d_status_updates = rdr.read_status_updates(
-        sim_set.PATH_STATUS_UPDATES,
-        end_date_col=end_date_col,
-        sim_set=sim_set,
-        **kwargs
+    d_status_updates = (
+        rdr.read_status_updates(
+            sim_set.PATH_STATUS_UPDATES,
+            end_date_col=end_date_col,
+            sim_set=sim_set,
+            **kwargs
+        ).sort_values(
+            by = [cn.ID_REGISTRATION, cn.TSTART, cn.STATUS_DETAIL],
+            ascending=(True, True, False)
+        )
     )
 
     d_status_updates = d_status_updates.loc[

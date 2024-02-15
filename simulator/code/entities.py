@@ -670,26 +670,8 @@ class Patient:
             self.__dict__[cn.ET_HLA_MISMATCHFREQ] = et_hla_mmfreqs.get(
                 cn.ET_MMP_SPLIT, et_hla_mmfreqs.get(cn.ET_MMP_BROAD, 0)
             )
-            return self._et_mmp
-        else:
-            raise Exception('Cannot calculate ET-MMP, without hla system.')
 
-    def get_mmp(self) -> float:
-        """Calculates the ET mismatch probability, under the assumption that
-            HLAs, blood types, and unacceptables are independent. This is how
-            ET calculates the mismatch probability
-        """
-        if self._mmp:
-            return self._mmp
-        elif isinstance(self.hla_system, HLASystem):
-            mmps, prob_max_1mms = self.hla_system.calculate_mismatch_probabilities(
-                p = self
-            )
-            self._mmp = mmps.get(cn.ET_MMP_SPLIT, mmps.get(cn.ET_MMP_BROAD, 0))
-            self.__dict__[cn.ET_HLA_MISMATCHFREQ] = prob_max_1mms.get(
-                cn.ET_MMP_SPLIT, mmps.get(cn.ET_MMP_BROAD, 0)
-            )
-            return self._mmp
+            return self._et_mmp
         else:
             raise Exception('Cannot calculate ET-MMP, without hla system.')
 
@@ -984,7 +966,7 @@ class Patient:
 
     def _update_unacceptables(self, upd: StatusUpdate):
         if isinstance(upd.status_value, str):
-            self.__dict__[cn.VPRA] = float(upd.status_detail) / 100
+            self.__dict__[cn.VPRA] = float(upd.status_detail)
             self.__dict__[cn.UNACC_ANT] = upd.status_value
         else:
             self.__dict__[cn.UNACC_ANT] = ''
@@ -1882,7 +1864,7 @@ class InternationalTransplantation:
 
 
 class BalanceSystem:
-    """ Balancing system of ETKAS, potentially with a grouping var
+    """ Balancing system of ETKAS, potentially with a grouping var (e.g. blood type)
     ...
 
     Attributes   #noqa
@@ -1938,6 +1920,7 @@ class BalanceSystem:
         }
 
     def remove_expired_balance_items(self, current_time: float):
+        """Removes expired balances"""
         if current_time > self.first_expiry:
             for balances_by_country in self.national_balances.values():
                 for balances in balances_by_country.values():
@@ -2206,5 +2189,3 @@ class BalanceSystem:
             ).txp_expiry_time
         if self._first_expiry:
             return self._first_expiry
-
-    # TODO: add code to trim balances, i.e. remove expired balances

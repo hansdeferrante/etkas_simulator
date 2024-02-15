@@ -60,7 +60,6 @@ class MatchPointFunction:
             clamp_defaults: Optional[Dict[str, int]] = None,
             round: bool = True
     ) -> None:
-        self.intercept = intercept
         self.coef = {k.lower(): fl for k, fl in coef.items()}
         self.interactions = {
             key: key.split(':')
@@ -130,10 +129,6 @@ class MatchPointFunction:
         for k, coef in self.coef.items():
             sc[self.points_comp_to_group.get(k)] += match_record[k] * coef
 
-        sc[
-            self.points_comp_to_group.get(cn.INTERCEPT)
-        ] += self.intercept
-
         return {
             k: round_to_int(v) for k, v in sc.items()
         }
@@ -143,7 +138,4 @@ class MatchPointFunction:
             f'{round_to_decimals(v, p=3)}*{self.trafos.get(k, "I")}({k})'
             for k, v in self.coef.items()
             ]
-        if self.intercept != 0:
-            return ' + '.join([str(self.intercept)] + fcoefs)
-        else:
-            return ' + '.join(fcoefs)
+        return ' + '.join(fcoefs)

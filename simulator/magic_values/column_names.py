@@ -92,6 +92,10 @@ MM_TOTAL = 'mm_total'
 RECIPIENT_OFFERED = 'patient_offered'
 GEOGRAPHY_MATCH = 'match_geography'
 MATCH_ABROAD = 'match_abroad'
+MATCH_DISTANCE = 'distance'
+MATCH_LOCAL = 'match_l'
+MATCH_NATIONAL = 'match_n'
+MATCH_INTERNATIONAL = 'match_i'
 ALLOCATION_LOC = 'alloc_loc'
 ALLOCATION_REG = 'alloc_reg'
 ALLOCATION_NAT = 'alloc_nat'
@@ -340,6 +344,8 @@ A = 'A'  # abroad
 H = 'H'  # home
 R = 'R'  # regional
 L = 'L'  # local
+N = 'N'  # national
+I = 'I'  # international
 
 # Event types
 PAT = 'patient'
@@ -413,3 +419,8 @@ POINTS_HLA_PED = 'wfmr_xc_mism_ped'
 
 POINTS_ETKAS = 'points_etkas'
 POINTS_ESP = 'points_esp'
+
+# Travel info
+FROM_CENTER = 'from_center'
+TO_CENTER = 'to_center'
+DRIVING_TIME = 'driving_time'

@@ -23,9 +23,6 @@ from simulator.code.ScoringFunction import MatchPointFunction
 from simulator.magic_values.rules import (
     FL_CENTER_CODES, DICT_CENTERS_TO_REGIONS
     )
-from simulator.magic_values.etkass_settings import (
-        CNTR_OBLIGATION_CNTRIES
-    )
 
 
 class MatchRecord:
@@ -61,7 +58,10 @@ class MatchRecord:
             match_time: float,
             store_score_components: bool = False,
             attr_order_match: Optional[Tuple[str]] = None,
-            id_mtr: Optional[int] = None
+            id_mtr: Optional[int] = None,
+            center_travel_times: Optional[
+                Tuple[Dict[str, Dict[str, float]], Dict[str, Dict[str, str]]]
+            ] = None
             ) -> None:
 
         if attr_order_match is None:
@@ -79,6 +79,7 @@ class MatchRecord:
         self._other_profile_compatible = None
         self._mq_compatible = None
         self._no_unacceptables = None
+        self.center_travel_times = center_travel_times
 
         # Copy over selected attributes from patient and donor
         self.__dict__.update(
@@ -100,6 +101,10 @@ class MatchRecord:
             (self.patient.age_days_at_listing + self.match_time - self.patient.listing_offset) /
             365.25
         )
+
+        # Match distances
+        self._alloc_nat = None
+        self._alloc_reg = None
 
         # Match points and match tuple
         self.total_match_points = 0
@@ -191,6 +196,50 @@ class MatchRecord:
             ) for loc in mgr.HLA_LOCI)
         return(''.join(mms).rstrip(' '))
 
+    def _determine_match_distance(self):
+        """Determine match criterium for allocation"""
+        self_dict = self.__dict__
+        pat_dict = self.patient.__dict__
+        if (
+            pat_dict[cn.RECIPIENT_COUNTRY] !=
+            self_dict[cn.D_ALLOC_COUNTRY]
+        ):
+            self_dict[cn.GEOGRAPHY_MATCH] = cn.A
+            self_dict[cn.MATCH_DISTANCE] = cn.I
+        else:
+            # Determine match criteria & geography in case of
+            # national allocation
+            if (
+                pat_dict[cn.RECIPIENT_CENTER] ==
+                self_dict[cn.D_ALLOC_CENTER]
+            ):
+                self_dict[cn.GEOGRAPHY_MATCH] = cn.L
+            elif self.allocation_regional:
+                self_dict[cn.GEOGRAPHY_MATCH] = cn.R
+            elif self.allocation_national:
+                self_dict[cn.GEOGRAPHY_MATCH] = cn.H
+
+            # Determine the match distances
+            if (
+                self_dict[cn.D_ALLOC_COUNTRY] == mgr.GERMANY or
+                self_dict[cn.D_ALLOC_COUNTRY] == mgr.AUSTRIA or
+                self_dict[cn.D_ALLOC_COUNTRY] == mgr.BELGIUM
+            ):
+                if (
+                    pat_dict[cn.RECIPIENT_REGION] ==
+                    self_dict[cn.D_ALLOC_REGION]
+                ):
+                    self_dict[cn.MATCH_DISTANCE] = cn.L
+                else:
+                    self_dict[cn.MATCH_DISTANCE] = cn.N
+            else:
+                self_dict[cn.MATCH_DISTANCE] = cn.L
+
+        # Convert to information necessary for allocation
+        self_dict[cn.MATCH_LOCAL] = 1 if self_dict[cn.MATCH_DISTANCE] == cn.L else 0
+        self_dict[cn.MATCH_NATIONAL] = 1 if self_dict[cn.MATCH_DISTANCE] == cn.N else 0
+        self_dict[cn.MATCH_INTERNATIONAL] = 1 if self_dict[cn.MATCH_DISTANCE] == cn.I else 0
+
     def __repr__(self):
         return(
             f'{self.determine_mismatch_string()} offer to '
@@ -208,7 +257,8 @@ class MatchRecord:
         else:
             points_str = (
                 f'{self.total_match_points}pts:\n\t' + ' '.join(
-                    f'{v} {k}'.ljust(12) for k, v in self.sc.items()
+                    f"{v} {str(k).removeprefix('wfmr_xc_').upper()}".ljust(12)
+                    for k, v in self.sc.items()
                 )
             )
         try:
@@ -231,6 +281,53 @@ class MatchRecord:
     def __lt__(self, other):
         """Order by match tuple."""
         return self.match_tuple > other.match_tuple
+
+    def _determine_allocation_national(self):
+        """Determine whether allocation is regional"""
+        self_dict = self.__dict__
+        pat_dict = self.patient.__dict__
+
+        if (
+            self_dict[cn.D_ALLOC_COUNTRY] == pat_dict[cn.RECIPIENT_COUNTRY]
+        ):
+            return True
+        else:
+            return False
+
+    def _determine_allocation_regional(self):
+        """Determine whether allocation is regional"""
+        self_dict = self.__dict__
+        pat_dict = self.patient.__dict__
+
+        if (
+            self.allocation_national and
+            (
+                self_dict[cn.D_ALLOC_COUNTRY] == mgr.GERMANY or
+                self_dict[cn.D_ALLOC_COUNTRY] == mgr.AUSTRIA or
+                self_dict[cn.D_ALLOC_COUNTRY] == mgr.BELGIUM
+            )
+        ):
+            if (
+                pat_dict[cn.RECIPIENT_REGION] ==
+                   self_dict[cn.D_ALLOC_REGION]
+                ):
+                    return True
+            else:
+                return False
+        else:
+            return False
+
+    @property
+    def allocation_national(self):
+        if self._alloc_nat is None:
+            self._alloc_nat = self._determine_allocation_national()
+        return self._alloc_nat
+
+    @property
+    def allocation_regional(self):
+        if self._alloc_reg is None:
+            self._alloc_reg = self._determine_allocation_regional()
+        return self._alloc_reg
 
     @property
     def other_profile_compatible(self):
@@ -292,6 +389,7 @@ class MatchList:
             sort: bool = True,
             store_score_components: bool = False,
             attr_order_match: Optional[List[str]] = None,
+            travel_time_dict: Optional[Dict[str, Any]] = None
             ) -> None:
 
         self.__dict__[cn.MATCH_DATE] = match_date
@@ -324,8 +422,16 @@ class MatchList:
 
         if (alloc_country == mgr.GERMANY and alloc_region is None):
             raise Exception(
-                'No region defined for German center: {alloc_center}'
+                f'No region defined for German center: {alloc_center}'
             )
+
+        if travel_time_dict:
+            self.center_travel_times = travel_time_dict[
+                self.donor.__dict__[cn.DONOR_CENTER]
+            ]
+        else:
+            self.center_travel_times = None
+
 
         self.match_list = [
                 record_class(
@@ -341,7 +447,8 @@ class MatchList:
                     bal_system=bal_system,
                     attr_order_match=attr_order_match,
                     calc_points=calc_points,
-                    store_score_components=store_score_components
+                    store_score_components=store_score_components,
+                    center_travel_times=self.center_travel_times
                 ) for pat in patients
             ]
 

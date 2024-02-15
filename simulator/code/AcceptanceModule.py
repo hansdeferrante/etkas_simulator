@@ -118,9 +118,16 @@ class AcceptanceModule:
         self.simulate_random_effects = simulate_random_effects
         if self.simulate_random_effects:
             self.random_effects = {
+                'rd': {
+                    cn.ID_REGISTRATION: 0.57532,
+                    cn.ID_DONOR: 0.60142
+                },
+                'cd': {
+                    cn.ID_DONOR: 0.75508
+                }
             }
             self.realizations_random_effects = {
-                k: {} for k in self.random_effects.keys()
+                k: defaultdict(dict) for k in self.random_effects.keys()
             }
 
     def generate_offers_to_rescue(self, d_country: str, program: str) -> int:
@@ -219,17 +226,35 @@ class AcceptanceModule:
         return False
 
     def _calc_prob_accept(
-        self, offer: MatchRecord, verbose: Optional[int] = None
+        self, offer: MatchRecord, verbose: Optional[int] = None,
+        selected_model: str = 'rd'
     ):
         """Calculate probability acceptance with separate HU/ACO models"""
         if verbose is None:
             verbose = self.verbose
         if verbose > 1:
             print('*******')
+
+        realization_intercept = 0
+        if self.simulate_random_effects:
+            for var, sd in self.random_effects[selected_model].items():
+                if (re := self.realizations_random_effects[selected_model][var].get(offer.__dict__[var])) is not None:
+                    realization_intercept += re
+                else:
+                    re = self.rng_random_eff.normal(
+                        loc=0,
+                        scale=sd
+                    )
+                    self.realizations_random_effects[selected_model][
+                        var
+                    ][offer.__dict__[var]] = re
+                    realization_intercept += re
+
         return self._calculate_logit(
                 offer=offer,
                 which='rd',
-                verbose=verbose
+                verbose=verbose,
+                realization_intercept=realization_intercept
         )
 
     def calc_prob_enbloc(
@@ -248,15 +273,33 @@ class AcceptanceModule:
 
     def calculate_center_offer_accept(
             self, offer: MatchRecord,
-            verbose: Optional[int] = 0
+            verbose: Optional[int] = 0,
+            selected_model: str = 'cd'
     ) -> float:
         """Calculate probability center accepts"""
         if verbose and verbose > 1:
             print('*******')
+
+        realization_intercept = 0
+        if self.simulate_random_effects:
+            for var, sd in self.random_effects[selected_model].items():
+                if (re := self.realizations_random_effects[selected_model][var].get(offer.__dict__[var])) is not None:
+                    realization_intercept += re
+                else:
+                    re = self.rng_random_eff.normal(
+                        loc=0,
+                        scale=sd
+                    )
+                    self.realizations_random_effects[selected_model][
+                        var
+                    ][offer.__dict__[var]] = re
+                    realization_intercept += re
+
         return self._calculate_logit(
                 offer=offer,
-                which='cd',
-                verbose=verbose
+                which=selected_model,
+                verbose=verbose,
+                realization_intercept=realization_intercept
         )
 
     def _calculate_logit(
@@ -359,10 +402,12 @@ class AcceptanceModule:
             print(f'{which} is not a valid option for prediction of acceptance with the ETKAS simulator')
         return inv_logit(slogit)
 
-    def simulate_esp_allocation(self, match_list: MatchListESP, n_kidneys_available=int):
+    def simulate_esp_allocation(
+            self, match_list: MatchListESP,
+            n_kidneys_available=int
+        ) -> Tuple[Optional[List[MatchRecord]], Dict[str, bool], bool]:
         """ Iterate over all match records. Do not model rescue allocation."""
 
-        # TODO: Add rescue allocation for ESP? Not sure when that is triggered / what happens
         if self.simulate_rescue:
             offers_till_rescue = self.generate_offers_to_rescue(
                     match_list.__dict__[cn.D_ALLOC_COUNTRY],
@@ -374,17 +419,23 @@ class AcceptanceModule:
         # TODO: in ESP, rescue is not triggerable currently; allocation then stops
         # and we move on to ETKAS for allocation. In reality, also very rarely
         # ESP-aged kidneys are allocated via rescue, so perhaps not an issue?
-        acc_matchrecords, center_willingness = self._find_accepting_matchrecords(
+        acc_matchrecords, center_willingness, rescue_triggered = self._find_accepting_matchrecords(
             match_list,
             max_offers=offers_till_rescue,
             max_offers_per_center=5,
             n_kidneys_available=n_kidneys_available
         )
-        return acc_matchrecords
+
+        if rescue_triggered:
+            match_list.donor.rescue = True
+
+        return acc_matchrecords, center_willingness, rescue_triggered
 
     def simulate_etkas_allocation(
         self, match_list: MatchListCurrentETKAS,
-        n_kidneys_available: int
+        n_kidneys_available: int,
+        esp_rescue: bool = False,
+        center_willingness: Optional[Dict[str, bool]] = None
     ) -> Optional[List[MatchRecord]]:
         """ Iterate over a list of match records. If we model rescue alloc,
             we simulate when rescue will be triggered and terminate
@@ -393,25 +444,32 @@ class AcceptanceModule:
             prioritize locally in Belgium / regionally in Germany.
         """
         # When not simulating rescue, offer to all patients on the match list
-        if self.simulate_rescue:
-            offers_till_rescue = self.generate_offers_to_rescue(
-                    match_list.__dict__[cn.D_ALLOC_COUNTRY],
-                    program = mgr.ETKAS
-            )
+        if esp_rescue:
+            offers_till_rescue=0
+            print('ESP with rescue triggered; 0 offers made until rescue in ETKAS')
+            print(match_list.donor.rescue)
+            print(center_willingness)
         else:
-            offers_till_rescue = 9999
+            if self.simulate_rescue:
+                offers_till_rescue = self.generate_offers_to_rescue(
+                        match_list.__dict__[cn.D_ALLOC_COUNTRY],
+                        program = mgr.ETKAS
+                )
+            else:
+                offers_till_rescue = 9999
 
         # Allocate until `offers_till_rescue` rescue offers have been made.
         # This returns the match record for the accepting patient
         # (`acc_matchrecord`) if the graft was accepted, and a list of
         # centers willing to accept the organ (determined at the
         # center level)
-        acc_matchrecords, center_willingness = (
+        acc_matchrecords, center_willingness, _ = (
             self._find_accepting_matchrecords(
                 match_list,
                 max_offers=offers_till_rescue,
                 max_offers_per_center=5,
-                n_kidneys_available=n_kidneys_available
+                n_kidneys_available=n_kidneys_available,
+                center_willing_to_accept=center_willingness
             )
         )
         if acc_matchrecords:
@@ -426,7 +484,7 @@ class AcceptanceModule:
         # If rescue was triggered before an acceptance, continue
         # allocation with prioritization for candidates with
         # rescue priority (local in BE, regional in DE).
-        if acc_matchrecords is None or (
+        if (
             n_kidneys_accepted < n_kidneys_available
         ):
             match_list._initialize_extalloc_priorities()
@@ -437,7 +495,7 @@ class AcceptanceModule:
 
             # If rescue is triggered, prioritize remaining waitlist
             # on rescue priority (i.e. local in Belgium, regional in DE)
-            acc_matchrecords_rescue, _ = self._find_accepting_matchrecords(
+            acc_matchrecords_rescue, _, _ = self._find_accepting_matchrecords(
                 match_list,
                 center_willing_to_accept=center_willingness,
                 n_kidneys_available=n_kidneys_available
@@ -458,7 +516,7 @@ class AcceptanceModule:
             max_offers: Optional[int] = 9999,
             max_offers_per_center: int = 9999,
             center_willing_to_accept: Optional[Dict[str, bool]] = None
-    ) -> Tuple[Optional[List[MatchRecord]], Dict[str, bool]]:
+    ) -> Tuple[Optional[List[MatchRecord]], Dict[str, bool], bool]:
         """ Iterate over all match records in the match list, and simulate
             if the match object accepts the graft offer.
 
@@ -479,12 +537,13 @@ class AcceptanceModule:
         """
 
         count_rejections_total = 0
+        rescue_triggered: bool = False
         n_rejections_per_center = defaultdict(int)
         if center_willing_to_accept is None:
             center_willing_to_accept = {}
 
         if len(match_list) == 0:
-            return None, {}
+            return None, {}, rescue_triggered
 
         # If extended allocation has been triggered, order in offer
         # of extended allocation.
@@ -580,7 +639,7 @@ class AcceptanceModule:
                             match_object.__dict__[cn.ENBLOC] = 0
                             n_kidneys_accepted += 1
                         if n_kidneys_accepted == n_kidneys_available:
-                            return match_objects, center_willing_to_accept
+                            return match_objects, center_willing_to_accept, rescue_triggered
                         elif n_kidneys_accepted > n_kidneys_available:
                             raise Exception(
                                 f'{n_kidneys_accepted} candidate(s) have accepted the kidney,'
@@ -609,11 +668,11 @@ class AcceptanceModule:
         # If too little acceptances in regular allocation, return
         # the accepting match record.
         if len(match_objects) >= 0:
-            return match_objects, center_willing_to_accept
+            return match_objects, center_willing_to_accept, rescue_triggered
 
         # In case of no acceptance in regular allocation, return
         # center willingness to accept (to trigger rescue)
-        return None, center_willing_to_accept
+        return None, center_willing_to_accept, rescue_triggered
 
 
     def fe_coefs_to_dict(self, level: pd.Series, coef: pd.Series):
@@ -655,6 +714,7 @@ class AcceptanceModule:
         for k, v in dict_paths_coefs.items():
             self.__dict__[k] = pd.read_csv(v, dtype='str')
             self.__dict__[k]['coef'] = self.__dict__[k]['coef'].astype(float)
+            self.__dict__[k]['coef'].fillna(value=0, inplace=True)
 
         coef_keys = list(dict_paths_coefs.keys())
 

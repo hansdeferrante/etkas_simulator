@@ -17,6 +17,7 @@ import typing
 from operator import attrgetter
 
 from simulator.code.utils import DotDict, round_to_decimals
+import simulator.code.read_input_files as rdr
 from simulator.code.current_etkas.CurrentETKAS import \
     MatchListCurrentETKAS, MatchRecordCurrentETKAS, \
     MatchListESP, PatientMatchRecord
@@ -139,7 +140,7 @@ class ETKASS:
         self,
         sim_set: DotDict,
         max_n_patients: Optional[int] = None,
-        verbose: Optional[bool] = True
+        verbose: Optional[int] = True
     ):
 
         # Read in simulation settings
@@ -165,6 +166,9 @@ class ETKASS:
             ) / timedelta(days=1)
         )
 
+        # Read in travel time dictionary
+        self.dict_travel_times = rdr.read_travel_times()
+
         # Initialize the acceptance module
         self.acceptance_module = AcceptanceModule(
             seed=self.sim_set.SEED,
@@ -172,7 +176,8 @@ class ETKASS:
             patient_acc_policy=str(sim_set.PATIENT_ACC_POLICY),
             # separate_ped_model=bool(sim_set.SEPARATE_PED_ACCEPTANCE),
             simulate_rescue=self.sim_rescue,
-            verbose=0
+            verbose=0,
+            simulate_random_effects=sim_set.SIMULATE_RANDOM_EFFECTS
         )
         if self.verbose:
             print('Loaded acceptance module')
@@ -453,13 +458,16 @@ class ETKASS:
                         hla_system=self.hla_system,
                         bal_system=self.bal_system,
                         calc_points=self.sim_set.calc_esp_score,
-                        store_score_components=False
+                        store_score_components=self.sim_set.STORE_SCORE_COMPONENTS,
+                        travel_time_dict=self.dict_travel_times
                     )
 
                      # Now determine which patient accepts the organ
-                    accepted_mrs_esp = self.acceptance_module.simulate_esp_allocation(
-                        match_list_esp,
-                        n_kidneys_available=donor.__dict__[cn.N_KIDNEYS_AVAILABLE]
+                    accepted_mrs_esp, center_willingness_esp, esp_rescue_triggered = (
+                        self.acceptance_module.simulate_esp_allocation(
+                            match_list_esp,
+                            n_kidneys_available=donor.__dict__[cn.N_KIDNEYS_AVAILABLE]
+                        )
                     )
                     if self.sim_set.SAVE_MATCH_LISTS:
                         self.sim_results.save_match_list(match_list_esp)
@@ -481,6 +489,7 @@ class ETKASS:
                 else:
                     match_list_esp = None
                     n_accepted_esp = 0
+                    center_willingness_esp = None
 
                 if (donor.__dict__[cn.N_KIDNEYS_AVAILABLE] - n_accepted_esp) > 0:
                     # Allocation via ETKAS. Construct an match-list with all patients
@@ -503,8 +512,16 @@ class ETKASS:
                         hla_system=self.hla_system,
                         bal_system=self.bal_system,
                         calc_points=self.sim_set.calc_etkas_score,
-                        store_score_components=False
+                        store_score_components=self.sim_set.STORE_SCORE_COMPONENTS,
+                        travel_time_dict=self.dict_travel_times
                     )
+                    if self.verbose >= 3:
+                        for i, mr in enumerate(match_list_etkas.return_match_list()):
+                            print(mr)
+                            if i > 20:
+                                break
+                        input('Printed match list, press enter to continue.')
+
 
                     if donor.__dict__[cn.DONOR_AGE] >= self.age_esp:
                         match_list_etkas._initialize_extalloc_priorities()
@@ -515,7 +532,9 @@ class ETKASS:
                             match_list_etkas,
                             n_kidneys_available=(
                                 donor.__dict__[cn.N_KIDNEYS_AVAILABLE] - n_accepted_esp
-                            )
+                            ),
+                            center_willingness=center_willingness_esp,
+                            esp_rescue=esp_rescue_triggered
                         )
                     )
 
@@ -533,7 +552,11 @@ class ETKASS:
                                 current_date=current_date,
                                 donor=donor
                             )
-                        n_accepted_etkas = len(accepted_mrs_etkas)
+                        n_accepted_etkas = sum(
+                            2 if mr.__dict__[cn.ENBLOC]
+                            else 1
+                            for mr in accepted_mrs_etkas
+                        )
                     else:
                         n_accepted_etkas = 0
                 else:
@@ -590,12 +613,12 @@ class ETKASS:
         )
 
         # Add transplantation to balance if it is international
-        if accepted_mr.__dict__[cn.ALLOCATION_INT]:
+        if accepted_mr.__dict__[cn.MATCH_INTERNATIONAL]:
             self.bal_system.add_balance_from_txp(
                 rcrd=accepted_mr.__dict__,
                 txp_time=self.sim_time,
                 expiry_time=self.sim_time + self.sim_set.WINDOW_FOR_BALANCE
-        )
+            )
 
         # Simulate post-transplant survival, i.e. simulate
         # patient / graft failure, and add a synthetic

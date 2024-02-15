@@ -403,6 +403,26 @@ def read_diags(input_path: str, **kwargs) -> pd.DataFrame:
     return data_
 
 
+def read_travel_times(
+    path_drive_time: str = es.PATH_DRIVING_TIMES
+) -> Dict[str, Dict[str, float]]:
+    """Read in expected travelling times by car between centers"""
+
+    travel_info = pd.read_csv(
+        path_drive_time
+    )
+
+    # Select the right travel time.
+    travel_dict = (
+        travel_info.groupby(cn.FROM_CENTER)[
+            [cn.FROM_CENTER, cn.TO_CENTER, cn.DRIVING_TIME]
+        ].apply(lambda x: x.set_index(cn.TO_CENTER).to_dict(orient='index'))
+        .to_dict()
+    )
+
+    return(travel_dict)
+
+
 def read_profiles(input_path: str, usecols: Optional[List[str]] = None, **kwargs) -> pd.DataFrame:
     """"Read in patient file."""
 
