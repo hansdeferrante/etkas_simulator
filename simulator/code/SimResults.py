@@ -297,6 +297,9 @@ class SimResults:
         id_cols = [c for c in data_.columns if c.startswith('id')]
         data_.loc[:, id_cols] = data_.loc[:, id_cols].astype('Int64')
         data_.dropna(how='all', axis='columns', inplace=True)
+        data_.loc[:, cn.ACCEPTED] = data_.loc[:, cn.ACCEPTANCE_REASON].isin(
+            (cn.T1, cn.T3)
+        )
         return data_
 
     def return_transplantations(

@@ -302,8 +302,6 @@ def read_donors(
 
 def read_donor_balances(
         input_path: str,
-        sim_start_date: datetime,
-        max_window_length: 99999,
         datecols: Optional[List[str]] = None,
         usecols: Optional[List[str]] = None,
         **kwargs
@@ -326,10 +324,56 @@ def read_donor_balances(
 
     # Remove donors not from ET
     data_ = data_[data_[cn.D_ALLOC_COUNTRY].isin(es.ET_COUNTRIES)]
+    data_ = data_.fillna(
+        value=dtypes.DTYPE_DONOR_FILL_NAS
+    )
+    return data_
+
+def read_historic_donor_balances(
+        input_path: str,
+        sim_start_date: datetime,
+        max_window_length: 99999,
+        datecols: Optional[List[str]] = None,
+        usecols: Optional[List[str]] = None,
+        **kwargs
+):
+    data_ = read_donor_balances(
+        input_path=input_path,
+        usecols=usecols,
+        datecols=datecols,
+        **kwargs
+    )
 
     # Filter to donors which occured prior to simulation start date
     data_ = data_[data_[cn.D_DATE] <= sim_start_date]
     data_ = data_[data_[cn.D_DATE] >= sim_start_date - timedelta(days=max_window_length)]
+
+    return data_
+
+
+def read_nonetkasesp_balances(
+        input_path: str,
+        sim_start_date: datetime,
+        sim_end_date: datetime,
+        datecols: Optional[List[str]] = None,
+        usecols: Optional[List[str]] = None,
+        **kwargs
+) -> pd.DataFrame:
+    """"Read in patient file."""
+
+    data_ = read_donor_balances(
+        input_path=input_path,
+        usecols=usecols,
+        datecols=datecols,
+        **kwargs
+    )
+
+    # Filter to donors which occured during the sim period
+    data_ = data_[data_[cn.D_DATE] >= sim_start_date]
+    data_ = data_[data_[cn.D_DATE] <= sim_end_date]
+
+    # Filter to non-ETKAS/ESP donors.
+    data_ = data_[data_[cn.NON_ETKAS_ESP] == 1]
 
     data_ = data_.fillna(
         value=dtypes.DTYPE_DONOR_FILL_NAS

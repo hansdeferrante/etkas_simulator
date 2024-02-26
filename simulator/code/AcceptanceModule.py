@@ -578,7 +578,14 @@ class AcceptanceModule:
             # offer prior to rescue / extended allocation.
             if match_object.__dict__.get(cn.ACCEPTANCE_REASON, None):
                 continue
-            elif hasattr(match_object, '_initialize_acceptance_information'):
+
+            # Check whether offer is profile compatible.
+            if not match_object.profile_compatible:
+                match_object.set_acceptance(reason=cn.FP)
+                continue
+
+            # For profile compatible offers, initialize acceptance information
+            if hasattr(match_object, '_initialize_acceptance_information'):
                 match_object._initialize_acceptance_information()
 
             # 1) determine whether center is willing to accept
@@ -586,21 +593,17 @@ class AcceptanceModule:
                 match_object.__dict__[cn.RECIPIENT_CENTER] in
                 center_willing_to_accept
             ):
-                if match_object.profile_compatible:
-                    if self.determine_center_acceptance(
-                        match_object
-                    ):
-                        center_willing_to_accept[
-                            match_object.__dict__[cn.RECIPIENT_CENTER]
-                        ] = True
-                    else:
-                        center_willing_to_accept[
-                            match_object.__dict__[cn.RECIPIENT_CENTER]
-                        ] = False
-                        count_rejections_total += 1
+                if self.determine_center_acceptance(
+                    match_object
+                ):
+                    center_willing_to_accept[
+                        match_object.__dict__[cn.RECIPIENT_CENTER]
+                    ] = True
                 else:
-                    match_object.set_acceptance(reason=cn.FP)
-                    continue
+                    center_willing_to_accept[
+                        match_object.__dict__[cn.RECIPIENT_CENTER]
+                    ] = False
+                    count_rejections_total += 1
 
             # 2) if center finds patient acceptable, make a patient-driven offer
             if center_willing_to_accept.get(
@@ -684,7 +687,6 @@ class AcceptanceModule:
                 var2, l2 = lv2.split('-')
 
                 if l1 in fe_dict:
-
                     if var2 in fe_dict[l1]:
                         fe_dict[l1][var2].update(
                             {l2: val}

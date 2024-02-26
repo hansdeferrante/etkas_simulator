@@ -462,6 +462,7 @@ class Patient:
         )
 
         # Items we want to store, for rapid access through functions and properties
+        self.valid_pra = 0
         self.__dict__[cn.R_PED] = None
         self._needed_match_info = None
         self._offer_inherit_cols = None
@@ -856,6 +857,8 @@ class Patient:
                 self._update_dialysis_status(stat_update)
             elif stat_update.type_status == mgr.UNACC:
                 self._update_unacceptables(stat_update)
+            elif stat_update.type_status == mgr.PRA:
+                self._update_pra(stat_update)
             elif isinstance(stat_update, ProfileUpdate):
                 self.profile = stat_update.profile
                 self._other_profile_compatible = None
@@ -998,31 +1001,12 @@ class Patient:
         else:
             self.hu_since = np.nan
 
-    #def track_match_points(self, points: float):
-    #    """Function to track match points with exponential moving average.
-    #        Does not really help.
-    #    """
-    #    if self._previous_ema_matchpoints is None:
-    #        self._previous_ema_matchpoints = points
-    #    else:
-    #        self._previous_ema_matchpoints = (
-    #            (1-self._ema_alpha) * self._previous_ema_matchpoints + self._ema_alpha * points
-    #        )
-
-    #def retrieve_ema_match_points(self) -> float:
-    #    # If an exponential average of match points is available, return it
-    #    if self._previous_ema_matchpoints:
-    #        return self._previous_ema_matchpoints
-
-    #    # Otherwise, return waiting points at listing
-    #    if self.get_dial_time_sim_start():
-    #        if (dial_time_listing := self.get_dial_time_sim_start() - self.listing_offset) > 0:
-    #            waitpoints =  (dial_time_listing + self.__dict__[cn.PREVIOUS_WT])
-    #        else:
-    #            waitpoints = self.__dict__[cn.PREVIOUS_WT]
-    #    else:
-    #        waitpoints = self.__dict__[cn.PREVIOUS_WT]
-    #    return waitpoints * self.sim_set.POINTS_ETKAS.get('YEARS_ON_DIAL')
+    def _update_pra(self, upd: StatusUpdate):
+        self.valid_pra = float(upd.status_value)
+        if isinstance(upd.status_detail, str):
+            self.__dict__[cn.PRA] = float(upd.status_detail)
+        else:
+            self.__dict__[cn.PRA] = 0
 
     @property
     def am(self):
@@ -1293,6 +1277,12 @@ class HLASystem:
             hla_match_table.orig_allele
             )
         }
+        self.allelles_without_known_split = set(
+                hla_match_table.loc[
+                hla_match_table.split.str.contains('?', regex=False).fillna(False),
+                'allele'
+            ].to_list()
+        )
 
         hla_match_table.allele = hla_match_table.allele.str.upper()
         hla_match_table.split = hla_match_table.split.str.upper()
@@ -1308,8 +1298,9 @@ class HLASystem:
         self.alleles_by_type = defaultdict(dict)
         self.splits_by_type = defaultdict(dict)
         self.broads_by_type = defaultdict(dict)
-        self.broads_to_splits = defaultdict(lambda: defaultdict(dict))
-        self.broads_to_alleles = defaultdict(lambda: defaultdict(dict))
+        self.broads_to_splits = defaultdict(lambda: defaultdict(set))
+        self.broads_to_alleles = defaultdict(lambda: defaultdict(set))
+        self.splits_to_alleles = defaultdict(lambda: defaultdict(set))
 
         self.loci_zero_mismatch = sim_set.LOCI_ZERO_MISMATCH
 
@@ -1332,6 +1323,9 @@ class HLASystem:
             for broad, d_alleles in df_sel.groupby('broad'):
                 self.broads_to_splits[hla_locus][broad] = set(d_alleles.split.unique())
                 self.broads_to_alleles[hla_locus][broad] = set(d_alleles.allele.unique())
+                for split, d_alleles_split in d_alleles.groupby('split'):
+                    self.splits_to_alleles[hla_locus][split] = set(d_alleles_split.allele.unique())
+
                 for allele, split, broad in d_alleles.loc[:, [cn.ALLELE, cn.SPLIT, cn.BROAD]].to_records(index=False):
                     code_to_matchinfo[cn.ALLELE].update(
                         {
@@ -1352,6 +1346,20 @@ class HLASystem:
                         }
                     )
 
+        # Add unsplittable broads to splits_to_alleles dictionary.
+        for broad, splits in es.UNSPLITTABLES.items():
+            locus, broad = code_to_matchinfo[cn.BROAD][broad]
+            for split in splits:
+                if split in self.splits_to_alleles[locus]:
+                    self.splits_to_alleles[locus][broad] = self.splits_to_alleles[locus][broad].union(
+                        self.splits_to_alleles[locus][split]
+                    )
+        # Replace unsplittables from broads_to_splits dictionary
+        for broad, splits in es.UNSPLITTABLES.items():
+            locus, broad = code_to_matchinfo[cn.BROAD][broad]
+            self.broads_to_splits[locus][broad] = self.broads_to_splits[locus][broad].union((broad,))
+
+
         self.codes_to_allele = code_to_matchinfo[cn.ALLELE]
         self.codes_to_broad = code_to_matchinfo[cn.BROAD]
         self.codes_to_split = code_to_matchinfo[cn.SPLIT]
@@ -1369,6 +1377,7 @@ class HLASystem:
         }
 
         self.missing_splits = defaultdict(int)
+        self.unrecognized_antigens = list()
 
         self.needed_broad_mismatches = (
             set(sim_set.needed_broad_mismatches) if sim_set.needed_broad_mismatches is not None
@@ -1442,7 +1451,6 @@ class HLASystem:
     def order_structured_hla(
             self, input_string: str
     ):
-
         for fb in es.HLA_FORBIDDEN_CHARACTERS:
             if fb in input_string:
                 raise Exception(f'Forbidden character {fb} in donor HLA-input string! ({input_string})')
@@ -1454,14 +1462,18 @@ class HLASystem:
                 # In case a split is known for the broad, add split and check whether allele is present
                 for split in splits[locus]:
                     if self.codes_to_broad[split][1] == broad:
-                        if len(matching_alleles := self.broads_to_alleles[locus][broad].intersection(
+                        if len(matching_alleles := self.splits_to_alleles[locus][split].intersection(
                             alleles[locus]
                         )) > 0:
                             for allele in matching_alleles:
-                                if self.codes_to_split[allele][1] == split:
+                                if (corr_split := self.codes_to_split[allele][1]) == split:
                                     antigen_sets[locus].append((broad, split, allele))
+                                elif corr_split in es.UNSPLITTABLE_SPLITS:
+                                    if self.codes_to_broad[corr_split][1] == broad:
+                                        antigen_sets[locus].append((broad, split, allele))
                         else:
                             antigen_sets[locus].append((broad, split, None))
+
                 # In case no split is known for the broad, still check whether allele is present
                 if len(
                     splits[locus].intersection(
@@ -1495,18 +1507,23 @@ class HLASystem:
                     alleles[locus].difference(antigens)
                 )
             if len(missing_antigens) > 0:
-                raise Exception(f'The following antigens were not recognized: {missing_antigens}. Structured antigens: {antigen_sets}')
+                for antigen in missing_antigens:
+                    if 'XX' in antigen:
+                        if antigen not in self.unrecognized_antigens:
+                            print(f'Antigen {antigen} is not recognized. Likely ambiguous (XX)')
+                            self.unrecognized_antigens.append(antigen)
+                    else:
+                        raise Exception(f'The following antigens were not recognized: {missing_antigens}. Structured antigens: {antigen_sets}')
 
         # Check whether HLA locii are at most 2
         for locus, ant_set in antigen_sets.items():
             if len(ant_set) > 2:
-                raise Exception(f'Found for locus {locus} the following antigen sets:\n {antigen_sets}')
+                raise Exception(f'Found for locus {locus} the following antigen sets:\n {ant_set}\nInput string: {input_string}')
 
         # Sort & convert into a dictionary structure
         sorted_antigens = {
             locus: sorted(antigens) for locus, antigens in antigen_sets.items()
         }
-        print(sorted_antigens)
 
         structured_antigens = {
             f"{locus}_{i+1}_{'broad' if k == 0 else 'split' if k == 1 else 'allele'}": self.cleaned_alle_to_orig[ant] if k == 2 and ant is not None else ant
@@ -1523,11 +1540,11 @@ class HLASystem:
             d: Donor,
             p: Patient,
             loci: Optional[Set[str]] = None
-        ) -> Dict[str, int]:
+        ) -> Dict[str, Optional[int]]:
         return {
-            locus: len(hla_values.difference(p.hla_broads[locus]))
+            locus: len(hla_values.difference(p.hla_broads[locus])) if locus in p.hla_broads else None
             for locus, hla_values in d.hla_broads.items()
-            if locus in loci or loci is None
+            if (locus in loci or loci is None)
         }
 
 
@@ -1559,7 +1576,7 @@ class HLASystem:
                 mm[locus] = len(d_match_hlas.difference(r_match_hlas))
         return mm
 
-    def determine_mismatches(self, d: Donor, p: Patient):
+    def determine_mismatches(self, d: Donor, p: Patient, safely: bool = True):
         mm = {
             **{f'mmb_{k}': v for k, v in self._determine_broad_mismatches(d=d, p=p, loci=self.needed_broad_mismatches).items()},
             **{f'mms_{k}': v for k, v in self._determine_split_mismatches(d=d, p=p, loci=self.needed_split_mismatches).items()}
@@ -1567,7 +1584,7 @@ class HLASystem:
         if self._needed_mms is None:
             self._needed_mms = set(mm.keys())
 
-        if len(mm) != self.k_needed_mms:
+        if safely and len(mm) != self.k_needed_mms:
             return None
         else:
             mm[cn.MM_TOTAL] = -sum(mm.values())
@@ -2143,7 +2160,8 @@ class BalanceSystem:
     @classmethod
     def from_balance_df(
         cls, ss: DotDict, df_init_balances: pd.DataFrame, group_vars: Optional[Set[str]] = None,
-        update_balances: bool = True
+        update_balances: bool = True,
+        verbose: Optional[int] = 1
     ):
         # Add tstart and tstop columns for existing balances
         df_init_balances.loc[:, cn.TSTART] = (
@@ -2167,7 +2185,7 @@ class BalanceSystem:
         return cls(
             nations=es.ET_COUNTRIES,
             initial_national_balance=init_balances,
-            verbose=False,
+            verbose=verbose,
             group_vars=group_vars,
             update_balances=update_balances
         )

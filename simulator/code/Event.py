@@ -39,7 +39,7 @@ class Event:
             ) -> None:
 
         assert type_event in es.EVENT_TYPES, \
-            f'type_event must be one of {",".join(es.EVENT_TYPES)}'
+            f'type_event must be one of {", ".join(es.EVENT_TYPES)}'
         self.type_event = type_event
         assert event_time is not None, \
             (

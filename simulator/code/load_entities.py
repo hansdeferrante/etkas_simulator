@@ -208,7 +208,7 @@ def load_balances(
 
     # Read in obligations. Select only obligations inserted before the
     # simulation start date which did not end yet.
-    d_bal = rdr.read_donor_balances(
+    d_bal = rdr.read_historic_donor_balances(
         sim_set.PATH_BALANCES,
         sim_start_date=sim_set.SIM_START_DATE,
         max_window_length=sim_set.WINDOW_FOR_BALANCE
@@ -219,11 +219,27 @@ def load_balances(
         ss=sim_set,
         df_init_balances=d_bal,
         group_vars=sim_set.BALANCE_GROUP_VARS,
-        update_balances=update_balances
+        update_balances=update_balances,
+        verbose=1
     )
 
     return balance_system
 
+
+def load_nonetkasesp_balances(sim_set: DotDict) -> Dict[int, Dict[str, Any]]:
+    """Load non-ETKAS/ESP balances"""
+
+    d_bal = rdr.read_nonetkasesp_balances(
+        sim_set.PATH_BALANCES,
+        sim_start_date=sim_set.SIM_START_DATE,
+        sim_end_date=sim_set.SIM_END_DATE
+    )
+
+    bal_dict = {
+        i: rcrd for i, rcrd in enumerate(d_bal.to_dict('records'))
+    }
+
+    return(bal_dict)
 
 
 def load_donors(

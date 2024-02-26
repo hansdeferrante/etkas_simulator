@@ -29,7 +29,7 @@ from simulator.code.Event import Event
 from simulator.code.load_entities import \
         preload_profiles, preload_status_updates, load_patients, \
         load_donors, load_retransplantations, HLASystem, \
-        load_balances, BalanceSystem
+        load_balances, BalanceSystem, load_nonetkasesp_balances
 from simulator.code.entities import (
     Patient, Donor
 )
@@ -143,6 +143,9 @@ class ETKASS:
         verbose: Optional[int] = True
     ):
 
+        # Set up (empty) event queue
+        self.event_queue = EventQueue()
+
         # Read in simulation settings
         self.sim_set = sim_set
         self.sim_start_date = sim_set['SIM_START_DATE']
@@ -151,14 +154,24 @@ class ETKASS:
         self.sim_rescue = sim_set.get('SIMULATE_RESCUE', False)
         self.hla_system = HLASystem(sim_set)
         self.bal_system = load_balances(sim_set)
+        self.nonetkas_esp_transplants = load_nonetkasesp_balances(sim_set)
+
+        for bal_id, rcrd in self.nonetkas_esp_transplants.items():
+            self.event_queue.add(
+                    Event(
+                        type_event=cn.BAL,
+                        event_time=(
+                            rcrd[cn.D_DATE] - self.sim_set.SIM_START_DATE
+                        ) / timedelta(days=1),
+                        identifier=bal_id
+                    )
+                )
 
         # Set up times, and resort list every 14 days
         self.sim_time = 0
         self._time_active_list_resorted = 0
         self._resort_every_k_days = 14
 
-        # Set up (empty) event queue
-        self.event_queue = EventQueue()
 
         self.max_sim_time = (
             (
@@ -450,7 +463,8 @@ class ETKASS:
                                 ) and
                                 p.get_esp_eligible(s=self.sim_time)
                             ) and
-                            not p.am
+                            not p.am and      # Do not allow TXP to AM candidates
+                            p.valid_pra == 1  # Require a valid PRA
                         ),
                         donor=donor,
                         match_date=current_date,
@@ -503,7 +517,8 @@ class ETKASS:
                                     donor_dict[cn.D_DCD] == 0 or p.dcd_country
                                 ) and
                                 p.get_etkas_eligible(s=self.sim_time) and
-                                not p.am
+                                not p.am and       # Do not allow TXP for AM candidates
+                                p.valid_pra == 1   # Only candidates with not yet expired PRA screening are selected in ETKAS
                             )
                         ),
                         donor=donor,
@@ -584,6 +599,13 @@ class ETKASS:
                             matchl_=match_records,
                             n_discarded=n_discards
                             )
+
+            elif event.type_event == cn.BAL:
+                self.bal_system.add_balance_from_txp(
+                    rcrd=self.nonetkas_esp_transplants[event.identifier],
+                    txp_time=event.event_time,
+                    expiry_time=event.event_time + self.sim_set.WINDOW_FOR_BALANCE
+                )
             else:
                 raise ValueError(
                     f"{event.type_event} is not a valid event type."
