@@ -178,7 +178,8 @@ DTYPE_DONORBALLIST = {
     cn.D_AGE: int,
     cn.D_BLOODGROUP: str,
     cn.RECIPIENT_CENTER: str,
-    cn.RECIPIENT_COUNTRY: str
+    cn.RECIPIENT_COUNTRY: str,
+    cn.NON_ETKAS_ESP: int
 }
 
 

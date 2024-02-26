@@ -116,6 +116,7 @@ POINTS_DIST = 'wfmr_xc_dist'
 POINTS_PED = 'wfmr_xc_bonus_paed'
 POINTS_BALANCE_NAT = 'wfmr_xc_balance'
 POINTS_BALANCE_REG = 'wfmr_xc_balance_reg'
+NON_ETKAS_ESP = 'nonetkasesp'
 POINTS_DIST = 'wfmr_xc_dist'
 POINTS_HU = 'wfmr_xc_bonus_hu'
 POINTS_MMP_SPLIT = 'wfmr_xc_mmp_split'
@@ -125,6 +126,8 @@ BALANCE_REG = 'bal_reg'
 BALANCE_NAT = 'bal_nat'
 
 VPRA = 'vpra'
+PRA = 'pra'
+VALID_PRA = 'valid_pra'
 
 # Mismatch probabilities & mismatch frequencies.
 # Columns starting with ET_ are calculated under
@@ -349,6 +352,7 @@ I = 'I'  # international
 
 # Event types
 PAT = 'patient'
+BAL = 'balance'
 DON = 'don'
 
 # Indicator columns for blood group rules.

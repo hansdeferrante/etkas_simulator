@@ -98,7 +98,7 @@ PATH_DRIVING_TIMES = (
 ACCEPTANCE_PATHS = {
     k: DIR_ACCEPTANCE_COEFS + v for k, v in {
         'rd': 'coefs_recipient_driven.csv',
-        'cd': 'coefs_center_and_obligations.csv',
+        'cd': 'coefs_center_acceptance.csv',
         'enbloc': 'coefs_enbloc.csv'
     }.items()
 }
@@ -255,6 +255,8 @@ OUTPUT_COLS_PATIENTS = (
     cn.DISEASE_GROUP,
     cn.URGENCY_CODE,
     cn.VPRA,
+    cn.PRA,
+    cn.VALID_PRA,
     cn.ET_MMP,
     cn.ET_HLA_MISMATCHFREQ,
     cn.HLA_MISMATCHFREQ,
@@ -284,7 +286,8 @@ OUTPUT_COLS_EXITS = (
         cn.TYPE_RECORD, cn.VPRA, cn.ET_MMP, cn.HLA_MISMATCHFREQ,
         cn.ET_HLA_MISMATCHFREQ, cn.HZ_HLA_A, cn.HZ_HLA_B, cn.HZ_HLA_DR,
         cn.EXT_ALLOC_PRIORITY, cn.EXT_ALLOC_TRIGGERED,
-        cn.ALLOCATION_MECHANISM, cn.ALLOCATION_PROGRAM
+        cn.ALLOCATION_MECHANISM, cn.ALLOCATION_PROGRAM,
+        cn.PRA, cn.VALID_PRA
     ) + tuple(cg.MTCH_COLS) + tuple(COLS_TRANSPLANT_PROBS) +
     tuple(MISMATCH_STR_DEFINITION) + tuple(POINT_GROUPS.keys())
 )
@@ -309,7 +312,8 @@ MATCH_INFO_COLS = (
     cn.ACCEPTANCE_REASON, cn.PROB_ACCEPT_C, cn.PROB_ACCEPT_P, cn.DRAWN_PROB,
     cn.DRAWN_PROB_C, cn.PROFILE_COMPATIBLE,
     cn.VPRA, cn.ET_MMP, cn.ET_HLA_MISMATCHFREQ, cn.HLA_MISMATCHFREQ,
-    cn.HZ_HLA_A, cn.HZ_HLA_B, cn.HZ_HLA_DR
+    cn.HZ_HLA_A, cn.HZ_HLA_B, cn.HZ_HLA_DR,
+    cn.PRA, cn.VALID_PRA
 ) + tuple(cg.MTCH_COLS) + tuple(POINT_GROUPS.keys())
 
 
@@ -318,12 +322,12 @@ CUTOFF_REREG_RETURN_DIAL_TIME = 365
 
 # Add type statuses
 STATUS_TYPES = set(
-    (mgr.URG, mgr.FU, mgr.PRF, mgr.DIAG, mgr.HLA, mgr.UNACC, mgr.AM, mgr.DIAL)
+    (mgr.URG, mgr.FU, mgr.PRF, mgr.DIAG, mgr.HLA, mgr.UNACC, mgr.AM, mgr.DIAL, mgr.PRA)
 )
 STATUS_TYPES_TO_REMOVE = (mgr.PRF, mgr.DIAG, mgr.HLA, mgr.UNACC, mgr.AM, mgr.DIAL)
 
 # Event types
-EVENT_TYPES = [cn.PAT, cn.DON]
+EVENT_TYPES = [cn.PAT, cn.DON, cn.BAL]
 
 # Terminal status updates
 TERMINAL_STATUSES = [cn.R, cn.D]

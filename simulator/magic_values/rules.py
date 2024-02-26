@@ -247,14 +247,19 @@ def check_etkas_ped_rec(
         prev_txp_ped: Optional[bool],
         time_since_prev_txp: Optional[float]
     ) -> bool:
-    """Checks whether a patient is pediatric (i.e. <16 years)"""
+    """Checks whether a patient is pediatric. Can either be:
+        - pediatric age (<16),
+        - starting dialysis while pediatric (<=16)
+        - early graft failure (<91 days) when ped TXP
+    """
 
     if age_at_listing < 16:
         if not isnan(match_age) and match_age < 17:
             return True
-        else:
-            if age_first_dial and age_first_dial < 17:
-                return True
+        if age_first_dial and age_first_dial < 17:
+            return True
+    if age_first_dial and age_first_dial < 16:
+        return True
 
     if prev_txp_ped and time_since_prev_txp:
         if prev_txp_ped and time_since_prev_txp < 91:

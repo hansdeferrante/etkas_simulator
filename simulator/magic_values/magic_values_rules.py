@@ -74,6 +74,7 @@ UNACC = 'UNACC'
 URG = 'URG'
 AM = 'AM'
 DIAL = 'DIAL'
+PRA = 'PRA'
 
 ESP = 'ESP'
 ETKAS = 'ETKAS'
