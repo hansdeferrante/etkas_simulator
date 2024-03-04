@@ -1,0 +1,31 @@
+variable,variable_transformed,variable_transformation,level,coef
+graft_hbcab,,,1,0.151843417225493
+graft_hbsag,,,1,2.2864407042179
+graft_hcvab,,,1,0.133640645105425
+donor_hypertension,,,1,0.139769170908789
+malignancy,,,1,0.791051061559169
+death_cause_group,,,CNS tumor,0.294350564215495
+death_cause_group,,,CVA,0.0495641849068059
+death_cause_group,,,Head trauma,-0.00128806930140947
+death_cause_group,,,Other,-0.0393734839850293
+graft_dcd,,,1,-0.0265591707107304
+sepsis,,,1,-0.0536310604415606
+donor_last_creat,donor_last_creat_over_0p5,over_0p5,,0.157853691043042
+donor_last_creat,donor_last_creat_over_1,over_1,,0.738717761317279
+donor_last_creat,donor_last_creat_over_1p5,over_1p5,,-0.623249190700115
+donor_last_creat,donor_last_creat_over_3p5,over_3p5,,-0.215306479649092
+donor_diabetes,,,1,0.322718069132875
+donor_smoking,,,1,0.116697398671265
+donor_age,donor_age_under_18,under_18,,0.0558682373662193
+donor_age,donor_age_over_40,over_40,,0.0061162861723774
+donor_age,donor_age_over_65,over_65,,-0.0123353124048274
+donor_age,donor_age_over_75,over_75,,0.105024071860443
+d_cmv,,,1,-0.086868821917796
+d_urine_protein,,,1,0.0186950504779138
+d_urine_protein,,,2,0.102074318849295
+d_urine_protein,,,3,0.191172999615447
+d_bloodgroup,,,AB,-0.109444127908937
+d_bloodgroup,,,B,0.106633899077828
+d_bloodgroup,,,O,0.00729209972438457
+drug_abuse,,,1,-0.0794311796687533
+donor_carrest,,,1,-0.0864319945607355
