@@ -228,6 +228,7 @@ class MatchRecordCurrentETKAS(MatchRecord):
         # Information copied over manually
         self.__dict__[cn.D_MALIGNANCY] = self.donor.malignancy
         self.__dict__[cn.D_DRUG_ABUSE] = self.donor.drug_abuse
+        self.__dict__[cn.VPRA_PERCENT] = self.__dict__[cn.VPRA]*100
 
         # Information
         self.__dict__[cn.DONOR_AGE_75P] = int(
@@ -549,6 +550,7 @@ class MatchRecordCurrentESP(MatchRecord):
         # Information copied over manually
         self.__dict__[cn.D_MALIGNANCY] = self.donor.malignancy
         self.__dict__[cn.D_DRUG_ABUSE] = self.donor.drug_abuse
+        self.__dict__[cn.VPRA_PERCENT] = self.__dict__[cn.VPRA]*100
 
         # Information
         self.__dict__[cn.DONOR_AGE_75P] = int(

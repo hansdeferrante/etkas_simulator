@@ -189,7 +189,7 @@ class ETKASS:
             patient_acc_policy=str(sim_set.PATIENT_ACC_POLICY),
             # separate_ped_model=bool(sim_set.SEPARATE_PED_ACCEPTANCE),
             simulate_rescue=self.sim_rescue,
-            verbose=0,
+            verbose=verbose,
             simulate_random_effects=sim_set.SIMULATE_RANDOM_EFFECTS
         )
         if self.verbose:

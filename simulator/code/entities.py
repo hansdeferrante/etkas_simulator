@@ -9,8 +9,7 @@ Created on Wed Feb  2 17:33:44 2022
 import warnings
 from typing import List, Dict, Tuple, Optional, Callable, DefaultDict, Union, Any, Set
 from datetime import timedelta, datetime
-from math import floor, isnan, ceil, prod
-from itertools import count
+from math import isnan, prod
 from copy import deepcopy, copy
 from warnings import warn
 from collections import defaultdict, deque
@@ -18,16 +17,15 @@ from collections import defaultdict, deque
 import yaml
 import pandas as pd
 import numpy as np
-from simulator.code.utils import round_to_int, round_to_decimals, len_setdiff, DotDict
+from simulator.code.utils import round_to_int, round_to_decimals, DotDict
 import simulator.magic_values.etkass_settings as es
 import simulator.magic_values.magic_values_rules as mgr
+import simulator.magic_values.rules as r
 from simulator.code.StatusUpdate import StatusUpdate, ProfileUpdate
 from simulator.code.PatientStatusQueue import PatientStatusQueue
 from simulator.code.SimResults import SimResults
 import simulator.magic_values.column_names as cn
-import simulator.magic_values.magic_values_rules as mr
 import simulator.code.read_input_files as rdr
-from simulator.code.ScoringFunction import clamp
 
 from simulator.magic_values.inputfile_settings import DEFAULT_DMY_HMS_FORMAT
 from simulator.code.read_input_files import read_hla_match_table
@@ -86,10 +84,11 @@ class Donor:
             diabetes: int,
             cardiac_arrest: bool,
             last_creat: float,
+            urine_protein: int,
             smoker: bool,
             age: int, hbsag: bool,
             hcvab: bool, hbcab: bool,
-            sepsis: bool, meningitis: bool,
+            cmv: bool, sepsis: bool, meningitis: bool,
             malignancy: bool, drug_abuse: bool,
             euthanasia: bool,
             rescue: bool, death_cause_group: str,
@@ -109,7 +108,10 @@ class Donor:
             f'donor country should be one of:\n\t' \
             f'{", ".join(es.ET_COUNTRIES)}, not {donor_country}'
         self.donor_country = donor_country
-        self.donor_region = donor_region
+        self.donor_region = (
+            donor_region if donor_region in r.ALLOWED_REGIONS
+            else r.DICT_CENTERS_TO_REGIONS[donor_center]
+        )
         self.donor_center = donor_center
         self.__dict__[cn.D_PED] = None
 
@@ -124,12 +126,24 @@ class Donor:
         # Profile info
         if age is not None:
             self.__dict__[cn.D_AGE] = age
+            if age < 18:
+                self.__dict__[cn.D_AGE_GROUP] = 'lt18'
+            elif age < 35:
+                self.__dict__[cn.D_AGE_GROUP] = '18_to_34'
+            elif age < 50:
+                self.__dict__[cn.D_AGE_GROUP] = '35_to_49'
+            elif age < 65:
+                self.__dict__[cn.D_AGE_GROUP] = '50_to_64'
+            else:
+                self.__dict__[cn.D_AGE_GROUP] = '65p'
         self.__dict__[cn.D_HBSAG] = hbsag if hbsag is not None and  \
             hbsag is not np.nan else False
         self.__dict__[cn.D_HCVAB] = hcvab if hcvab is not None and \
             hcvab is not np.nan else False
         self.__dict__[cn.D_HBCAB] = hbcab if hbcab is not None and \
             hbcab is not np.nan else False
+        self.__dict__[cn.D_CMV] = cmv if cmv is not None and  \
+            cmv is not np.nan else False
         self.sepsis = sepsis if sepsis is not None and \
             sepsis is not np.nan else False
         self.meningitis = meningitis if meningitis is not None and \
@@ -162,6 +176,8 @@ class Donor:
             if not nanOrNone(hypertension) else 0
         self.__dict__[cn.D_LAST_CREAT] = last_creat \
             if not nanOrNone(last_creat) else 0
+        self.__dict__[cn.D_URINE_PROTEIN] = int(urine_protein) \
+            if not nanOrNone(urine_protein) else 0
         self.__dict__[cn.D_CARREST] = cardiac_arrest \
             if not nanOrNone(cardiac_arrest) else 0
 
@@ -374,7 +390,10 @@ class Patient:
 
         # Set patient center, region, and country
         self.__dict__[cn.RECIPIENT_CENTER] = str(recipient_center)
-        self.__dict__[cn.RECIPIENT_REGION] = str(recipient_region)
+        self.__dict__[cn.RECIPIENT_REGION] = (
+            str(recipient_region) if recipient_region in r.ALLOWED_REGIONS
+            else r.DICT_CENTERS_TO_REGIONS[recipient_center]
+        )
         self.__dict__[cn.RECIPIENT_COUNTRY] = str(recipient_country)
         self.__dict__[cn.PATIENT_COUNTRY] = str(recipient_country)
 
@@ -458,7 +477,7 @@ class Patient:
 
         # Participation in ETKAS or ESP (needed for Germany, if ESP)
         self.kidney_program: str = (
-            kidney_program if isinstance(kidney_program, str) else mr.ETKAS
+            kidney_program if isinstance(kidney_program, str) else mgr.ETKAS
         )
 
         # Items we want to store, for rapid access through functions and properties
@@ -707,7 +726,7 @@ class Patient:
                 s < self.sim_time_esp_eligible or
                 (
                     s >= self.sim_time_esp_eligible and
-                    self.kidney_program == mr.ETKAS
+                    self.kidney_program == mgr.ETKAS
                 )
             )
             self._esp_eligible = not self._etkas_eligible
@@ -988,7 +1007,7 @@ class Patient:
         )
 
         # Track other information
-        if self.urgency_code == mr.T:
+        if self.urgency_code == mgr.T:
             self.__dict__[cn.LAST_NONNT_HU] = False
             if not self.__dict__[cn.ANY_ACTIVE]:
                 self.__dict__[cn.ANY_ACTIVE] = True
@@ -1293,7 +1312,7 @@ class HLASystem:
         self.broads = set(hla_match_table.broad.unique())
 
         self.all_match_codes = (
-            self.alleles.union(self.splits).union(self.broads).union(mr.PUBLICS)
+            self.alleles.union(self.splits).union(self.broads).union(mgr.PUBLICS)
         )
         self.alleles_by_type = defaultdict(dict)
         self.splits_by_type = defaultdict(dict)
@@ -1381,11 +1400,11 @@ class HLASystem:
 
         self.needed_broad_mismatches = (
             set(sim_set.needed_broad_mismatches) if sim_set.needed_broad_mismatches is not None
-            else {mr.HLA_A, mr.HLA_B}
+            else {mgr.HLA_A, mgr.HLA_B}
         )
         self.needed_split_mismatches = (
             set(sim_set.needed_split_mismatches) if sim_set.needed_split_mismatches is not None
-            else {mr.HLA_DR}
+            else {mgr.HLA_DR}
         )
 
         self.mmp_loci_splits = tuple(self.sim_set.get('LOCI_MMP_SPLIT', self.needed_split_mismatches))
@@ -1410,7 +1429,7 @@ class HLASystem:
         input_string_upp = input_string.upper()
         for code in input_string_upp.split():
            if code not in self.all_match_codes:
-               print(f'{code} not a valid code')
+               print(f'{code} is not a valid code (from: {input_string})')
         return set(
             code for code in input_string_upp.split(' ')
             if code in self.all_match_codes
@@ -1540,9 +1559,11 @@ class HLASystem:
             d: Donor,
             p: Patient,
             loci: Optional[Set[str]] = None
-        ) -> Dict[str, Optional[int]]:
+        ) -> Dict[str, Optional[float]]:
         return {
-            locus: len(hla_values.difference(p.hla_broads[locus])) if locus in p.hla_broads else None
+            locus: len(hla_values.difference(p.hla_broads[locus]))
+            if locus in p.hla_broads and len(p.hla_broads[locus]) > 0
+            else None
             for locus, hla_values in d.hla_broads.items()
             if (locus in loci or loci is None)
         }
@@ -1557,6 +1578,8 @@ class HLASystem:
             loci = d.hla_splits.keys()
         mm = {
             locus: len(hla_values.difference(p.hla_splits[locus]))
+            if locus in p.hla_splits and len(p.hla_splits[locus]) > 0
+            else None
             for locus, hla_values in d.hla_splits.items()
             if locus in loci
         }
@@ -1573,7 +1596,7 @@ class HLASystem:
                             if ds:
                                 r_match_hlas.union(rs).remove(cb)
                                 d_match_hlas.union(rs).remove(cb)
-                mm[locus] = len(d_match_hlas.difference(r_match_hlas))
+                mm[locus] = len(d_match_hlas.difference(r_match_hlas)) if len(r_match_hlas) > 0 else None
         return mm
 
     def determine_mismatches(self, d: Donor, p: Patient, safely: bool = True):
@@ -1587,8 +1610,11 @@ class HLASystem:
         if safely and len(mm) != self.k_needed_mms:
             return None
         else:
-            mm[cn.MM_TOTAL] = -sum(mm.values())
-            return mm
+            try:
+                mm[cn.MM_TOTAL] = -sum(mm.values())
+                return mm
+            except:
+                return mm
 
     def _calc_et_prob1mm(
             self,
@@ -1840,19 +1866,19 @@ class InternationalTransplantation:
         self.group = group
         self.level = level
         self.type = type
-        self.party = party if party != mr.LUXEMBOURG else mr.BELGIUM
+        self.party = party if party != mgr.LUXEMBOURG else mgr.BELGIUM
         if party_center in es.REG_BAL_CENTER_GROUPS:
             self.party_center = es.REG_BAL_CENTER_GROUPS[party_center]
         else:
             self.party_center = party_center
         self.transplant_type = transplant_type
-        if transplant_type == mr.EXPORT:
+        if transplant_type == mgr.EXPORT:
             self.transplant_value = -1
-        elif transplant_type == mr.IMPORT:
+        elif transplant_type == mgr.IMPORT:
             self.transplant_value = +1
         else:
             raise Exception(
-                f'Transplant type should be {mr.EXPORT} or {mr.IMPORT}'
+                f'Transplant type should be {mgr.EXPORT} or {mgr.IMPORT}'
                 f'not {transplant_type}'
             )
         self.txp_time = txp_time
@@ -2050,7 +2076,7 @@ class BalanceSystem:
     def _current_bal_as_df(self, which_bal: str) -> pd.DataFrame:
         """Return current obligations as pd.DataFrame"""
         match which_bal:
-            case mr.NATIONAL:
+            case mgr.NATIONAL:
                 which_bal = self.national_balances
                 group_colnames = self.group_vars
                 balkey = 'balance'
@@ -2064,7 +2090,7 @@ class BalanceSystem:
                         df_obl['group'].tolist(), index=df_obl.index
                     )
                 df_obl = df_obl.drop(columns=['group'])
-            case mr.REGIONAL:
+            case mgr.REGIONAL:
                 balkey='balance'
                 if self.group_vars:
                     group_colnames = self.group_vars + (cn.D_COUNTRY,)
@@ -2090,7 +2116,7 @@ class BalanceSystem:
                 df_obl = df_obl.drop(columns=['group'])
             case _:
                 raise Exception(
-                    f'which_bal should be {mr.REGIONAL} or {mr.NATIONAL}'
+                    f'which_bal should be {mgr.REGIONAL} or {mgr.NATIONAL}'
                     f' not {which_bal}'
                 )
         return df_obl
@@ -2125,22 +2151,22 @@ class BalanceSystem:
             group = ('1',)
 
         donor_party = (
-                rcrd[cn.D_ALLOC_COUNTRY] if rcrd[cn.D_ALLOC_COUNTRY] != mr.LUXEMBOURG
-                else mr.BELGIUM
+                rcrd[cn.D_ALLOC_COUNTRY] if rcrd[cn.D_ALLOC_COUNTRY] != mgr.LUXEMBOURG
+                else mgr.BELGIUM
             )
         rec_party = (
             rcrd[cn.RECIPIENT_COUNTRY]
-            if rcrd[cn.RECIPIENT_COUNTRY] != mr.LUXEMBOURG
-            else mr.BELGIUM
+            if rcrd[cn.RECIPIENT_COUNTRY] != mgr.LUXEMBOURG
+            else mgr.BELGIUM
         )
 
         target_dict[group][donor_party].append(
                 InternationalTransplantation(
                     group=group,
-                    level=mr.NATIONAL,
+                    level=mgr.NATIONAL,
                     party=donor_party,
                     party_center=rcrd[cn.D_ALLOC_CENTER],
-                    transplant_type=mr.EXPORT,
+                    transplant_type=mgr.EXPORT,
                     txp_time=txp_time,
                     txp_expiry_time=expiry_time
                 )
@@ -2148,10 +2174,10 @@ class BalanceSystem:
         target_dict[group][rec_party].append(
             InternationalTransplantation(
                 group=group,
-                level=mr.NATIONAL,
+                level=mgr.NATIONAL,
                 party=rec_party,
                 party_center=rcrd[cn.RECIPIENT_CENTER],
-                transplant_type=mr.IMPORT,
+                transplant_type=mgr.IMPORT,
                 txp_time=txp_time,
                 txp_expiry_time=expiry_time
             )

@@ -23,7 +23,7 @@ from simulator.code.current_etkas.CurrentETKAS import \
     MatchListESP, MatchRecordCurrentESP
 from simulator.code.AllocationSystem import MatchRecord, MatchList
 from simulator.code.entities import Donor, Patient, Profile
-from simulator.code.read_input_files import read_rescue_probs
+from simulator.code.read_input_files import read_rescue_baseline_hazards
 
 import numpy as np
 
@@ -56,7 +56,8 @@ class AcceptanceModule:
         center_acc_policy: str,
         dict_paths_coefs: Dict[str, str] = es.ACCEPTANCE_PATHS,
         simulate_rescue: bool = False,
-        paths_rescue_probs: Optional[Dict[str, str]] = None,
+        path_coefs_rescueprobs: Optional[str] = None,
+        path_basehaz_rescueprobs: Optional[str] = None,
         verbose: Optional[int] = None,
         simulate_random_effects: Optional[bool] = True
     ):
@@ -82,6 +83,19 @@ class AcceptanceModule:
                 f'not {patient_acc_policy}'
             )
 
+        # If simulating rescue allocation, also read in fixed effects for Cox model
+        self.simulate_rescue = simulate_rescue
+        if simulate_rescue:
+            if path_basehaz_rescueprobs is None:
+                path_basehaz_rescueprobs = es.PATH_RESCUE_COX_BH
+            if path_coefs_rescueprobs is None:
+                path_coefs_rescueprobs = es.PATH_RESCUE_COX_COEFS
+
+            self.rescue_bh = read_rescue_baseline_hazards(path_basehaz_rescueprobs)
+            dict_paths_coefs.update(
+                {'coxph_rescue': path_coefs_rescueprobs}
+            )
+
         # Initialize coefficients for the logistic regression
         if (
             (patient_acc_policy == 'LR') |
@@ -90,6 +104,7 @@ class AcceptanceModule:
             self._initialize_lr_coefs(
                 dict_paths_coefs=dict_paths_coefs
             )
+
 
         # Set center acceptance policy.
         if center_acc_policy.lower() == 'LR'.lower():
@@ -105,54 +120,87 @@ class AcceptanceModule:
 
         self.calculate_prob_patient_accept = self._calc_prob_accept
 
-        self.simulate_rescue = simulate_rescue
-        if simulate_rescue:
-            if paths_rescue_probs is None:
-                paths_rescue_probs = es.PATHS_RESCUE_PROBABILITIES
-
-            self.rescue_init_probs = {
-                key: read_rescue_probs(path)
-                for key, path in es.PATHS_RESCUE_PROBABILITIES.items()
-            }
-
         self.simulate_random_effects = simulate_random_effects
         if self.simulate_random_effects:
             self.random_effects = {
                 'rd': {
-                    cn.ID_REGISTRATION: 0.57532,
-                    cn.ID_DONOR: 0.60142
+                    # cn.ID_REGISTRATION: 0.57532,
+                    cn.ID_DONOR: 0.53926
                 },
                 'cd': {
-                    cn.ID_DONOR: 0.75508
+                    #cn.ID_DONOR: 0.75508
                 }
             }
             self.realizations_random_effects = {
                 k: defaultdict(dict) for k in self.random_effects.keys()
             }
 
-    def generate_offers_to_rescue(self, d_country: str, program: str) -> int:
+
+    def _generate_rescue_eventcurve(
+            self, donor: Donor,
+            strata_column: Optional[str] = cn.DONOR_COUNTRY,
+            verbose: Optional[int] = 0) -> Tuple[
+        np.ndarray,
+        np.ndarray
+    ]:
+
+        lp = self._calculate_lp(
+            item=donor.__dict__,
+            which='coxph_rescue',
+            realization_intercept=0,
+            verbose=verbose
+        )
+
+        if strata_column is not None:
+            stratum = donor.__dict__[strata_column]
+        else:
+            stratum = np.nan
+
+        ind_cbh = self.rescue_bh[stratum][cn.CBH_RESCUE] * np.exp(lp)
+
+        return self.rescue_bh[stratum][cn.N_OFFERS_TILL_RESCUE], 1-np.exp(-ind_cbh)
+
+
+    def generate_offers_to_rescue(
+            self, donor: Donor,
+            program: Optional[str] = None,
+            verbose: Optional[int]=0
+        ) -> int:
         """ Sample the number of rejections made at triggering rescue/
             extended allocation from the empirical distribution per country
         """
-        if program == mgr.ESP:
-            prob_dict = self.rescue_init_probs[mgr.ESP]
-        elif program == mgr.ETKAS:
-            prob_dict = self.rescue_init_probs[mgr.ETKAS][d_country]
-        else:
-            raise Exception(
-                "Don't know how to generate rescue offers for the "
-                "{program}-allocation program. Try {mgr.ETKAS} or {mgr.ESP}")
+
+        n_offers, event_probs = self._generate_rescue_eventcurve(
+            donor=donor,
+            verbose=verbose
+        )
         r_prob = self.rng_rescue.random()
-        if any(prob_dict[cn.PROB_TILL_RESCUE] > r_prob):
+        if all(r_prob < event_probs):
+            return int(0)
+        elif any(r_prob < event_probs):
             which_n_offers = np.argmax(
-                prob_dict[cn.PROB_TILL_RESCUE] > r_prob
+                event_probs > r_prob
             )
-            n_offers = prob_dict[cn.N_OFFERS_TILL_RESCUE][
-                which_n_offers
-            ]
+            kth_offer = n_offers[which_n_offers]
         else:
-            n_offers = max(prob_dict[cn.N_OFFERS_TILL_RESCUE])
-        return int(n_offers)
+            kth_offer = len(n_offers)
+
+        if verbose:
+            print(f'{kth_offer-1} due to prob {r_prob}')
+
+        return int(kth_offer-1)
+
+    def predict_rescue_prob(
+            self, donor: Donor, kth_offer: int,
+            verbose: Optional[int]=0) -> float:
+        n_offers, event_probs = self._generate_rescue_eventcurve(
+            donor=donor,
+            verbose=2
+        )
+        which_prob = np.argmax(
+            n_offers >= kth_offer
+        )
+        return(event_probs[which_prob])
 
 
     def return_transplanted_organ(
@@ -200,6 +248,7 @@ class AcceptanceModule:
 
     def _center_accept_always(
         self, center_offer: MatchRecord,
+        k_previous_center_rejections: int,
         verbose: Optional[int] = None
     ) -> bool:
         center_offer.set_acceptance(
@@ -209,9 +258,19 @@ class AcceptanceModule:
 
     def _center_accept_lr(
         self, center_offer: MatchRecord,
+        k_previous_center_rejections: int,
         verbose: Optional[int] = None
     ) -> bool:
         """Check whether the center accepts."""
+
+        # Slovenia has very few patients; leads to collinearity issues.
+        if center_offer.__dict__[cn.PATIENT_COUNTRY] == mgr.SLOVENIA:
+            return True
+
+        center_offer.__dict__[cn.K_PREVIOUS_CENTER_REJECTIONS] = (
+            str(k_previous_center_rejections) if k_previous_center_rejections < 5
+            else '5+'
+        )
         center_offer.__dict__[cn.DRAWN_PROB_C] = self.rng_center.random()
         if (
             self.calculate_center_offer_accept(
@@ -294,6 +353,13 @@ class AcceptanceModule:
                         var
                     ][offer.__dict__[var]] = re
                     realization_intercept += re
+        if verbose:
+            print(self._calculate_logit(
+                        offer=offer,
+                        which=selected_model,
+                        realization_intercept=realization_intercept
+            )
+            )
 
         return self._calculate_logit(
                 offer=offer,
@@ -301,6 +367,109 @@ class AcceptanceModule:
                 verbose=verbose,
                 realization_intercept=realization_intercept
         )
+
+
+    def _calculate_lp(
+            self, item: Dict,
+            which: str, verbose: Optional[int] = None,
+            realization_intercept: Optional[float] = None
+    ):
+        # Realization of random intercept
+        if realization_intercept:
+            lp = realization_intercept
+        else:
+            lp = 0
+
+        for key, fe_dict in self.fixed_effects[which].items():
+            slogit_b4 = lp
+            var2 = None
+            if isinstance(fe_dict, dict):
+                if es.REFERENCE in fe_dict:
+                    var_slope = 0
+                    for variable, subgroup in fe_dict.items():
+                        if variable == es.REFERENCE:
+                            var_slope += subgroup
+                        else:
+                            var_slope += fe_dict[variable].get(
+                                str(item[variable]),
+                                0
+                            )
+                    lp += var_slope * item[key]
+                else:
+                    # If it is a regular item, it is not a slope. Simply add the matching coefficient.
+                    sel_coefs = fe_dict.get(
+                        str(int(item[key]))
+                        if isinstance(item[key], bool)
+                        else str(item[key]),
+                        None
+                    )
+                    if isinstance(sel_coefs, dict):
+                        for var2, dict2 in sel_coefs.items():
+                            if var2 == es.REFERENCE:
+                                lp += dict2
+                            else:
+                                lp += dict2.get(
+                                    str(item[var2]),
+                                    0
+                                )
+                    elif sel_coefs is None:
+                        newkey = (
+                            str(int(item[key]))
+                            if isinstance(item[key], bool)
+                            else str(item[key])
+                        )
+                        if self.reference_levels[which][key] is None:
+                            fe_dict[newkey] = 0
+                            self.reference_levels[which][key] = newkey
+                        else:
+                            raise Exception(
+                                f'Multiple reference levels for {key}:\n'
+                                f'\t{self.reference_levels[which][key]} and '
+                                f'{newkey}\n are both assumed reference levels.\n'
+                                f'Existing keys are:\n{self.fixed_effects[which][key]}'
+
+                            )
+                    else:
+                        lp += sel_coefs
+
+            elif key == 'intercept':
+                lp += fe_dict
+            else:
+                lp += item[key] * fe_dict
+
+            if (slogit_b4 != lp) & (verbose > 1):
+                if key in item:
+                    if var2:
+                        print(
+                            f'{key}-{item[key]}:'
+                            f'{var2}-{item[var2]}: '
+                            f'{lp-slogit_b4}'
+                        )
+                    else:
+                        print(
+                            f'{key}-{item[key]}: '
+                            f'{lp-slogit_b4}'
+                        )
+                else:
+                    print(f'{key}: {lp-slogit_b4}')
+
+        for orig_var, fe_dict in (
+            self.continuous_transformations[which].items()
+        ):
+            for coef_to_get, trafo in fe_dict.items():
+                if (value := item[orig_var]) is not None:
+                    contr = (
+                        trafo(value) *
+                        self.continuous_effects[which][orig_var][coef_to_get]
+                    )
+                    lp += contr
+
+                    if (contr != 0) & (verbose > 1):
+                        print(f'{coef_to_get}-{value}: {contr}')
+                else:
+                    print(f'{orig_var} yields None for {item}')
+
+        return(lp)
 
     def _calculate_logit(
             self, offer: MatchRecord,
@@ -311,84 +480,12 @@ class AcceptanceModule:
         if verbose is None:
             verbose = self.verbose
 
-        # Realization of random intercept
-        if realization_intercept:
-            slogit = realization_intercept
-        else:
-            slogit = 0
-
-        for key, fe_dict in self.fixed_effects[which].items():
-            slogit_b4 = slogit
-            var2 = None
-            if isinstance(fe_dict, dict):
-                sel_coefs = fe_dict.get(
-                    str(int(offer.__dict__[key]))
-                    if isinstance(offer.__dict__[key], bool)
-                    else str(offer.__dict__[key]),
-                    None
-                )
-                if isinstance(sel_coefs, dict):
-                    for var2, dict2 in sel_coefs.items():
-                        slogit += dict2.get(
-                            str(offer.__dict__[var2]),
-                            0
-                        )
-                elif sel_coefs is None:
-                    newkey = (
-                        str(int(offer.__dict__[key]))
-                        if isinstance(offer.__dict__[key], bool)
-                        else str(offer.__dict__[key])
-                    )
-                    if self.reference_levels[which][key] is None:
-                        fe_dict[newkey] = 0
-                        self.reference_levels[which][key] = newkey
-                    else:
-                        raise Exception(
-                            f'Multiple reference levels for {key}:\n'
-                            f'\t{self.reference_levels[which][key]} and '
-                            f'{newkey}\n are both assumed reference levels.\n'
-                            f'Existing keys are:\n{self.fixed_effects[which][key]}'
-
-                        )
-                else:
-                    slogit += sel_coefs
-
-            elif key == 'intercept':
-                slogit += fe_dict
-            else:
-                slogit += offer.__dict__[key] * fe_dict
-
-            if (slogit_b4 != slogit) & (verbose > 1):
-                if key in offer.__dict__:
-                    if var2:
-                        print(
-                            f'{key}-{offer.__dict__[key]}:'
-                            f'{var2}-{offer.__dict__[var2]}: '
-                            f'{slogit-slogit_b4}'
-                        )
-                    else:
-                        print(
-                            f'{key}-{offer.__dict__[key]}: '
-                            f'{slogit-slogit_b4}'
-                        )
-                else:
-                    print(f'{key}: {slogit-slogit_b4}')
-
-        for orig_var, fe_dict in (
-            self.continuous_transformations[which].items()
-        ):
-            for coef_to_get, trafo in fe_dict.items():
-                if (value := offer.__dict__[orig_var]) is not None:
-                    contr = (
-                        trafo(value) *
-                        self.continuous_effects[which][orig_var][coef_to_get]
-                    )
-                    slogit += contr
-
-                    if (contr != 0) & (verbose > 1):
-                        print(f'{coef_to_get}-{value}: {contr}')
-                else:
-                    print(f'{orig_var} yields None for {offer}')
+        slogit = self._calculate_lp(
+            item=offer.__dict__,
+            which=which,
+            verbose=verbose,
+            realization_intercept=realization_intercept
+        )
 
         if which == 'cd':
             offer.__dict__[cn.PROB_ACCEPT_C] = round_to_decimals(inv_logit(slogit), 3)
@@ -410,7 +507,7 @@ class AcceptanceModule:
 
         if self.simulate_rescue:
             offers_till_rescue = self.generate_offers_to_rescue(
-                    match_list.__dict__[cn.D_ALLOC_COUNTRY],
+                    donor=match_list.donor,
                     program = mgr.ESP
             )
         else:
@@ -452,7 +549,7 @@ class AcceptanceModule:
         else:
             if self.simulate_rescue:
                 offers_till_rescue = self.generate_offers_to_rescue(
-                        match_list.__dict__[cn.D_ALLOC_COUNTRY],
+                        match_list.donor,
                         program = mgr.ETKAS
                 )
             else:
@@ -594,7 +691,10 @@ class AcceptanceModule:
                 center_willing_to_accept
             ):
                 if self.determine_center_acceptance(
-                    match_object
+                    match_object,
+                    k_previous_center_rejections=sum(
+                        not value for _, value in center_willing_to_accept.items()
+                    )
                 ):
                     center_willing_to_accept[
                         match_object.__dict__[cn.RECIPIENT_CENTER]
@@ -685,8 +785,14 @@ class AcceptanceModule:
             if ':' in str(lev):
                 l1, lv2 = lev.split(':')
                 var2, l2 = lv2.split('-')
-
-                if l1 in fe_dict:
+                if len(l1) == 0:
+                    if var2 in fe_dict:
+                        fe_dict[var2].update(
+                            {l2: val}
+                        )
+                    else:
+                        fe_dict[var2] = {l2: val}
+                elif l1 in fe_dict:
                     if var2 in fe_dict[l1]:
                         fe_dict[l1][var2].update(
                             {l2: val}
@@ -700,9 +806,15 @@ class AcceptanceModule:
                         {l1: {var2: {l2: val}}}
                     )
             else:
-                fe_dict.update(
-                    {lev: val}
-                )
+                if not pd.isnull(level).all() and any(level.str.contains(':', regex=False)):
+                    if isinstance(lev, float) and isnan(lev):
+                        fe_dict = {es.REFERENCE: val}
+                    else:
+                        fe_dict[lev] = {es.REFERENCE: val}
+                else:
+                    fe_dict.update(
+                        {lev: val}
+                    )
         return fe_dict
 
     def _initialize_lr_coefs(

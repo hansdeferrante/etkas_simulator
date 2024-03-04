@@ -269,6 +269,7 @@ def load_donors(
                 reporting_date=rcrd[cn.D_DATE],
                 donor_dcd=rcrd[cn.D_DCD],
                 age=rcrd[cn.D_AGE],
+                cmv=rcrd[cn.D_CMV],
                 hbsag=rcrd[cn.D_HBSAG],
                 hcvab=rcrd[cn.D_HCVAB],
                 hbcab=rcrd[cn.D_HBCAB],
@@ -285,6 +286,7 @@ def load_donors(
                 hla=rcrd[cn.DONOR_HLA],
                 hypertension=rcrd[cn.D_HYPERTENSION],
                 last_creat=rcrd[cn.D_LAST_CREAT],
+                urine_protein=rcrd[cn.D_URINE_PROTEIN],
                 smoker=rcrd[cn.D_SMOKING],
                 cardiac_arrest=rcrd[cn.D_CARREST],
                 rescue=False if sim_set.get('SIMULATE_RESCUE', False) else bool(rcrd[cn.D_RESCUE])

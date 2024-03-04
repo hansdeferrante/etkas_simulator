@@ -11,7 +11,7 @@ Scripts to read in input files.
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Tuple
 from functools import reduce
-from numpy import arange, genfromtxt, ndarray, array
+from numpy import ndarray, nan
 import pandas as pd
 import warnings
 import yaml
@@ -238,7 +238,7 @@ def read_patients(
     return data_
 
 
-def read_rescue_probs(
+def read_rescue_baseline_hazards(
     input_path: str
 ) -> Dict[str, ndarray]:
     """Read in rescue probabilities"""
@@ -253,14 +253,16 @@ def read_rescue_probs(
         rescue_probs = {
             k: {
                 cn.N_OFFERS_TILL_RESCUE: v['offers_before_rescue'].to_numpy(),
-                cn.PROB_TILL_RESCUE: v['prob'].to_numpy()
+                cn.CBH_RESCUE: v['hazard'].to_numpy()
             }
             for k, v in rescue_probs.items()
         }
     else:
         rescue_probs = {
-            cn.N_OFFERS_TILL_RESCUE: rescue_probs.loc[:, 'offers_before_rescue'].to_numpy(),
-            cn.PROB_TILL_RESCUE: rescue_probs.loc[:, 'prob'].to_numpy()
+            nan: {
+                cn.N_OFFERS_TILL_RESCUE: rescue_probs.loc[:, 'offers_before_rescue'].to_numpy(),
+                cn.CBH_RESCUE: rescue_probs.loc[:, 'hazard'].to_numpy()
+            }
         }
     return rescue_probs
 

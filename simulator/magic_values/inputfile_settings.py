@@ -96,7 +96,7 @@ DTYPE_OFFERLIST = {
     cn.D_HLA_FULL: 'str',
     cn.POINTS_WAIT: 'float64',
     cn.POINTS_DIST: 'Int64',
-    cn.POINTS_PED: 'Int64',
+    cn.POINTS_PED: 'float64',
     cn.POINTS_BALANCE_NAT: 'Int64',
     cn.POINTS_BALANCE_REG: 'float64',
     cn.POINTS_DIST: 'Int64',
@@ -166,8 +166,10 @@ DTYPE_DONORLIST = {
     cn.D_HYPERTENSION: 'Int64',
     cn.D_SMOKING: 'Int64',
     cn.D_LAST_CREAT: 'float64',
+    cn.D_URINE_PROTEIN: 'float64',
     cn.D_CARREST: 'Int64',
-    cn.D_RESCUE: 'Int64'
+    cn.D_RESCUE: 'Int64',
+    cn.D_CMV: 'Int64'
 }
 
 

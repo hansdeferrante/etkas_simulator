@@ -84,10 +84,12 @@ DIR_POSTTXP_COEFS = 'simulator/magic_values/post_txp/'
 DIR_TEST_LR = 'data/test/'
 
 # Path to rescue probs
-PATHS_RESCUE_PROBABILITIES = {
-    mgr.ESP: 'simulator/magic_values/probabilities_rescue_triggered_ESP.csv',
-    mgr.ETKAS: 'simulator/magic_values/probabilities_rescue_triggered_ETKAS.csv'
-}
+PATH_RESCUE_COX_BH = (
+    'simulator/magic_values/acceptance/bh_rescue_triggered.csv'
+)
+PATH_RESCUE_COX_COEFS = (
+    'simulator/magic_values/acceptance/coefs_rescue_triggered.csv'
+)
 
 # Paths to files with travel information
 PATH_DRIVING_TIMES = (
@@ -124,7 +126,8 @@ OFFER_INHERIT_COLS = {
         cn.D_CARREST, cn.D_HBSAG, cn.D_HCVAB, cn.D_AGE,
         cn.D_HBCAB, cn.D_DIABETES, cn.D_HYPERTENSION,
         cn.D_LAST_CREAT, cn.D_TUMOR_HISTORY, cn.D_SMOKING,
-        cn.DONOR_COUNTRY, cn.DONOR_REGION
+        cn.DONOR_COUNTRY, cn.DONOR_REGION,
+        cn.D_CMV, cn.D_URINE_PROTEIN, cn.D_AGE_GROUP
     ],
     'patient': [
         cn.PATIENT_SEX, cn.URGENCY_CODE, cn.IS_RETRANSPLANT, cn.R_PED,
@@ -370,6 +373,5 @@ MATCH_TO_SPLITS = {
     v: f'mms_{v}' for v in mr.HLA_LOCI
 }
 
-
-
-
+GROUP_SPECIFIC_SLOPE = 'group_specific_slope'
+REFERENCE = 'reference'
