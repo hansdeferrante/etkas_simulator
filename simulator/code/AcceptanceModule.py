@@ -6,10 +6,12 @@ Created on Tue Sep 13
 @author: H.C. de Ferrante
 """
 
-from typing import Optional, Tuple, Dict, Union, List, Callable
+from typing import Optional, Tuple, Dict, Union, List, Any
 from math import isnan
-from operator import attrgetter
+from statistics import mean
+from operator import attrgetter, and_
 from collections import defaultdict
+from functools import reduce
 import numpy as np
 import pandas as pd
 
@@ -27,6 +29,11 @@ from simulator.code.read_input_files import read_rescue_baseline_hazards
 
 import numpy as np
 
+
+def boolkey_to_str(x):
+        if x is None:
+            return None
+        return str(int(x)) if isinstance(x, bool) else str(x)
 
 def logit(prob: float) -> float:
     """Calculates logit for probability"""
@@ -59,7 +66,9 @@ class AcceptanceModule:
         path_coefs_rescueprobs: Optional[str] = None,
         path_basehaz_rescueprobs: Optional[str] = None,
         verbose: Optional[int] = None,
-        simulate_random_effects: Optional[bool] = True
+        max_recipient_driven_offers_per_center: Optional[int] = 5,
+        simulate_random_effects: Optional[bool] = True,
+        simulate_joint_random_effects: Optional[bool] = True
     ):
         # Initialize random number generators
         rng = np.random.default_rng(seed=seed)
@@ -91,7 +100,9 @@ class AcceptanceModule:
             if path_coefs_rescueprobs is None:
                 path_coefs_rescueprobs = es.PATH_RESCUE_COX_COEFS
 
-            self.rescue_bh = read_rescue_baseline_hazards(path_basehaz_rescueprobs)
+            self.rescue_bh, self.rescue_bh_stratavars = (
+                read_rescue_baseline_hazards(path_basehaz_rescueprobs)
+            )
             dict_paths_coefs.update(
                 {'coxph_rescue': path_coefs_rescueprobs}
             )
@@ -121,24 +132,48 @@ class AcceptanceModule:
         self.calculate_prob_patient_accept = self._calc_prob_accept
 
         self.simulate_random_effects = simulate_random_effects
+        self.simulate_joint_random_effects = simulate_joint_random_effects
+        self.max_patient_rejections_per_center = (
+            max_recipient_driven_offers_per_center if
+            max_recipient_driven_offers_per_center is not None
+            else 99999
+        )
+
         if self.simulate_random_effects:
-            self.random_effects = {
-                'rd': {
-                    # cn.ID_REGISTRATION: 0.57532,
-                    cn.ID_DONOR: 0.53926
-                },
-                'cd': {
-                    #cn.ID_DONOR: 0.75508
+            self.re_varcomps = {
+                'etkas_rd': {cn.ID_DONOR: 0.64213},
+                'etkas_cd': {cn.ID_DONOR: 0.62078},
+                'esp_rd': {cn.ID_DONOR: 0.46817},
+                'esp_cd': {cn.ID_DONOR: 0.52579}
+            }
+            self.joint_re_vars = set(
+                reduce(
+                    and_,
+                    (sd.keys() for _, sd in self.re_varcomps.items())
+                    )
+            )
+            if len(self.joint_re_vars)>0:
+                self.joint_res = {
+                    joint_re: mean(sd[joint_re] for sd in self.re_varcomps.values())
+                    for joint_re in self.joint_re_vars
                 }
-            }
+            else:
+                self.joint_res = None
             self.realizations_random_effects = {
-                k: defaultdict(dict) for k in self.random_effects.keys()
+                k: defaultdict(dict)
+                for k in self.re_varcomps.keys()
+                if k not in self.joint_res
             }
+            self.realization_joint_random_effects = {
+                k: defaultdict(dict)
+                for k in self.joint_res
+            }
+        else:
+            self.joint_res = None
 
 
     def _generate_rescue_eventcurve(
             self, donor: Donor,
-            strata_column: Optional[str] = cn.DONOR_COUNTRY,
             verbose: Optional[int] = 0) -> Tuple[
         np.ndarray,
         np.ndarray
@@ -151,14 +186,12 @@ class AcceptanceModule:
             verbose=verbose
         )
 
-        if strata_column is not None:
-            stratum = donor.__dict__[strata_column]
-        else:
-            stratum = np.nan
+        cbh = self.rescue_bh
+        for strata_var in self.rescue_bh_stratavars:
+            cbh = cbh[donor.__dict__[strata_var]]
+        ind_cbh = cbh[cn.CBH_RESCUE] * np.exp(lp)
 
-        ind_cbh = self.rescue_bh[stratum][cn.CBH_RESCUE] * np.exp(lp)
-
-        return self.rescue_bh[stratum][cn.N_OFFERS_TILL_RESCUE], 1-np.exp(-ind_cbh)
+        return cbh[cn.N_OFFERS_TILL_RESCUE], 1-np.exp(-ind_cbh)
 
 
     def generate_offers_to_rescue(
@@ -186,9 +219,9 @@ class AcceptanceModule:
             kth_offer = len(n_offers)
 
         if verbose:
-            print(f'{kth_offer-1} due to prob {r_prob}')
+            print(f'{kth_offer} due to prob {r_prob}')
 
-        return int(kth_offer-1)
+        return int(kth_offer)
 
     def predict_rescue_prob(
             self, donor: Donor, kth_offer: int,
@@ -267,15 +300,24 @@ class AcceptanceModule:
         if center_offer.__dict__[cn.PATIENT_COUNTRY] == mgr.SLOVENIA:
             return True
 
-        center_offer.__dict__[cn.K_PREVIOUS_CENTER_REJECTIONS] = (
-            str(k_previous_center_rejections) if k_previous_center_rejections < 5
-            else '5+'
-        )
+        ESP = isinstance(center_offer, MatchRecordCurrentESP)
+
+        if ESP:
+            center_offer.__dict__[cn.K_PREVIOUS_CENTER_REJECTIONS] = (
+                str(k_previous_center_rejections) if k_previous_center_rejections < 4
+                else '4+'
+            )
+        else:
+            center_offer.__dict__[cn.K_PREVIOUS_CENTER_REJECTIONS] = (
+                str(k_previous_center_rejections) if k_previous_center_rejections < 8
+                else '8+'
+            )
         center_offer.__dict__[cn.DRAWN_PROB_C] = self.rng_center.random()
         if (
             self.calculate_center_offer_accept(
                     offer=center_offer,
-                    verbose=verbose
+                    verbose=verbose,
+                    selected_model='esp_cd' if ESP else 'etkas_cd'
                 ) >= center_offer.__dict__[cn.DRAWN_PROB_C]
         ):
             center_offer.set_acceptance(
@@ -284,9 +326,41 @@ class AcceptanceModule:
             return True
         return False
 
+    def simulate_random_intercept(self, offerdict: Dict[str, Any], selected_model: str):
+        # If simulating joint random effects, take from joint res only.
+        realization_intercept = 0
+        for var, sd in self.re_varcomps[selected_model].items():
+            if var in self.joint_re_vars and self.joint_res is not None:
+
+                if (re := self.realization_joint_random_effects[var].get(
+                    offerdict[var]
+                    )
+                ) is not None:
+                    realization_intercept += re
+                else:
+                    re = self.rng_random_eff.normal(
+                        loc=0,
+                        scale=self.joint_res[var]
+                    )
+                    self.realization_joint_random_effects[
+                        var
+                    ][offerdict[var]] = re
+                    realization_intercept += re
+            elif (re := self.realizations_random_effects[selected_model][var].get(offerdict[var])) is not None:
+                realization_intercept += re
+            else:
+                re = self.rng_random_eff.normal(
+                    loc=0,
+                    scale=sd
+                )
+                self.realizations_random_effects[selected_model][
+                    var
+                ][offerdict[var]] = re
+                realization_intercept += re
+        return realization_intercept
+
     def _calc_prob_accept(
-        self, offer: MatchRecord, verbose: Optional[int] = None,
-        selected_model: str = 'rd'
+        self, offer: MatchRecord, verbose: Optional[int] = None
     ):
         """Calculate probability acceptance with separate HU/ACO models"""
         if verbose is None:
@@ -294,24 +368,18 @@ class AcceptanceModule:
         if verbose > 1:
             print('*******')
 
-        realization_intercept = 0
+        selected_model = 'esp_rd' if isinstance(offer, MatchRecordCurrentESP) else 'etkas_rd'
         if self.simulate_random_effects:
-            for var, sd in self.random_effects[selected_model].items():
-                if (re := self.realizations_random_effects[selected_model][var].get(offer.__dict__[var])) is not None:
-                    realization_intercept += re
-                else:
-                    re = self.rng_random_eff.normal(
-                        loc=0,
-                        scale=sd
-                    )
-                    self.realizations_random_effects[selected_model][
-                        var
-                    ][offer.__dict__[var]] = re
-                    realization_intercept += re
+            realization_intercept = self.simulate_random_intercept(
+                offerdict=offer.__dict__,
+                selected_model=selected_model
+            )
+        else:
+            realization_intercept = 0
 
         return self._calculate_logit(
                 offer=offer,
-                which='rd',
+                which=selected_model,
                 verbose=verbose,
                 realization_intercept=realization_intercept
         )
@@ -333,26 +401,19 @@ class AcceptanceModule:
     def calculate_center_offer_accept(
             self, offer: MatchRecord,
             verbose: Optional[int] = 0,
-            selected_model: str = 'cd'
+            selected_model: str = 'etkas_cd'
     ) -> float:
         """Calculate probability center accepts"""
         if verbose and verbose > 1:
             print('*******')
 
-        realization_intercept = 0
         if self.simulate_random_effects:
-            for var, sd in self.random_effects[selected_model].items():
-                if (re := self.realizations_random_effects[selected_model][var].get(offer.__dict__[var])) is not None:
-                    realization_intercept += re
-                else:
-                    re = self.rng_random_eff.normal(
-                        loc=0,
-                        scale=sd
-                    )
-                    self.realizations_random_effects[selected_model][
-                        var
-                    ][offer.__dict__[var]] = re
-                    realization_intercept += re
+            realization_intercept = self.simulate_random_intercept(
+                offerdict=offer.__dict__,
+                selected_model=selected_model
+            )
+        else:
+            realization_intercept = 0
         if verbose:
             print(self._calculate_logit(
                         offer=offer,
@@ -383,6 +444,7 @@ class AcceptanceModule:
         for key, fe_dict in self.fixed_effects[which].items():
             slogit_b4 = lp
             var2 = None
+            sel_coefs = None
             if isinstance(fe_dict, dict):
                 if es.REFERENCE in fe_dict:
                     var_slope = 0
@@ -398,9 +460,7 @@ class AcceptanceModule:
                 else:
                     # If it is a regular item, it is not a slope. Simply add the matching coefficient.
                     sel_coefs = fe_dict.get(
-                        str(int(item[key]))
-                        if isinstance(item[key], bool)
-                        else str(item[key]),
+                        boolkey_to_str(item[key]),
                         None
                     )
                     if isinstance(sel_coefs, dict):
@@ -409,8 +469,14 @@ class AcceptanceModule:
                                 lp += dict2
                             else:
                                 lp += dict2.get(
-                                    str(item[var2]),
+                                    boolkey_to_str(item[var2]),
                                     0
+                                )
+                                if (verbose > 1) and dict2.get(boolkey_to_str(item[var2]), 0) != 0:
+                                    print(
+                                        f'{key}-{item[key]}:'
+                                        f'{var2}-{item[var2]}: '
+                                        f'{dict2.get(str(boolkey_to_str(item[var2])), 0)}'
                                 )
                     elif sel_coefs is None:
                         newkey = (
@@ -437,7 +503,7 @@ class AcceptanceModule:
             else:
                 lp += item[key] * fe_dict
 
-            if (slogit_b4 != lp) & (verbose > 1):
+            if (slogit_b4 != lp) & (verbose > 1) & (not isinstance(sel_coefs, dict)):
                 if key in item:
                     if var2:
                         print(
@@ -487,9 +553,9 @@ class AcceptanceModule:
             realization_intercept=realization_intercept
         )
 
-        if which == 'cd':
+        if 'cd' in which:
             offer.__dict__[cn.PROB_ACCEPT_C] = round_to_decimals(inv_logit(slogit), 3)
-        elif which == 'rd':
+        elif 'rd' in which:
             offer.__dict__[cn.PROB_ACCEPT_P] = round_to_decimals(inv_logit(slogit), 3)
             if verbose:
                 print(f'{which}: {round_to_decimals(inv_logit(slogit), 3)}')
@@ -502,7 +568,7 @@ class AcceptanceModule:
     def simulate_esp_allocation(
             self, match_list: MatchListESP,
             n_kidneys_available=int
-        ) -> Tuple[Optional[List[MatchRecord]], Dict[str, bool], bool]:
+        ) -> Tuple[Optional[List[MatchRecord]], Dict[str, bool], Dict[str, int], bool]:
         """ Iterate over all match records. Do not model rescue allocation."""
 
         if self.simulate_rescue:
@@ -513,26 +579,28 @@ class AcceptanceModule:
         else:
             offers_till_rescue = 9999
 
-        # TODO: in ESP, rescue is not triggerable currently; allocation then stops
-        # and we move on to ETKAS for allocation. In reality, also very rarely
-        # ESP-aged kidneys are allocated via rescue, so perhaps not an issue?
-        acc_matchrecords, center_willingness, rescue_triggered = self._find_accepting_matchrecords(
-            match_list,
-            max_offers=offers_till_rescue,
-            max_offers_per_center=5,
-            n_kidneys_available=n_kidneys_available
+        # Find accepting match records, center willingness to accept, and
+        # whether rescue was triggered for ESP allocation
+        acc_matchrecords, center_willingness, esp_rej_per_center, rescue_triggered = (
+            self._find_accepting_matchrecords(
+                match_list,
+                max_offers=offers_till_rescue,
+                max_patient_rejections_per_center=self.max_patient_rejections_per_center,
+                n_kidneys_available=n_kidneys_available
+            )
         )
 
         if rescue_triggered:
             match_list.donor.rescue = True
 
-        return acc_matchrecords, center_willingness, rescue_triggered
+        return acc_matchrecords, center_willingness, esp_rej_per_center, rescue_triggered
 
     def simulate_etkas_allocation(
         self, match_list: MatchListCurrentETKAS,
         n_kidneys_available: int,
         esp_rescue: bool = False,
-        center_willingness: Optional[Dict[str, bool]] = None
+        center_willingness: Optional[Dict[str, bool]] = None,
+        esp_rej_per_center: Optional[Dict[str, int]] = None
     ) -> Optional[List[MatchRecord]]:
         """ Iterate over a list of match records. If we model rescue alloc,
             we simulate when rescue will be triggered and terminate
@@ -543,9 +611,6 @@ class AcceptanceModule:
         # When not simulating rescue, offer to all patients on the match list
         if esp_rescue:
             offers_till_rescue=0
-            print('ESP with rescue triggered; 0 offers made until rescue in ETKAS')
-            print(match_list.donor.rescue)
-            print(center_willingness)
         else:
             if self.simulate_rescue:
                 offers_till_rescue = self.generate_offers_to_rescue(
@@ -560,13 +625,14 @@ class AcceptanceModule:
         # (`acc_matchrecord`) if the graft was accepted, and a list of
         # centers willing to accept the organ (determined at the
         # center level)
-        acc_matchrecords, center_willingness, _ = (
+        acc_matchrecords, center_willingness, etkas_reg_rej_per_center, _ = (
             self._find_accepting_matchrecords(
                 match_list,
                 max_offers=offers_till_rescue,
-                max_offers_per_center=5,
+                max_patient_rejections_per_center=self.max_patient_rejections_per_center,
                 n_kidneys_available=n_kidneys_available,
-                center_willing_to_accept=center_willingness
+                center_willing_to_accept=center_willingness,
+                rej_per_center=esp_rej_per_center
             )
         )
         if acc_matchrecords:
@@ -592,10 +658,12 @@ class AcceptanceModule:
 
             # If rescue is triggered, prioritize remaining waitlist
             # on rescue priority (i.e. local in Belgium, regional in DE)
-            acc_matchrecords_rescue, _, _ = self._find_accepting_matchrecords(
+            acc_matchrecords_rescue, _, _,  _ = self._find_accepting_matchrecords(
                 match_list,
                 center_willing_to_accept=center_willingness,
-                n_kidneys_available=n_kidneys_available
+                n_kidneys_available=n_kidneys_available,
+                rej_per_center=etkas_reg_rej_per_center,
+                max_patient_rejections_per_center=self.max_patient_rejections_per_center
             )
 
             if acc_matchrecords_rescue is not None:
@@ -611,9 +679,10 @@ class AcceptanceModule:
             match_list: Union[MatchListCurrentETKAS, MatchListESP, MatchList],
             n_kidneys_available: int,
             max_offers: Optional[int] = 9999,
-            max_offers_per_center: int = 9999,
-            center_willing_to_accept: Optional[Dict[str, bool]] = None
-    ) -> Tuple[Optional[List[MatchRecord]], Dict[str, bool], bool]:
+            max_patient_rejections_per_center: int = 9999,
+            center_willing_to_accept: Optional[Dict[str, bool]] = None,
+            rej_per_center: Optional[Dict[str, int]] = None
+    ) -> Tuple[Optional[List[MatchRecord]], Dict[str, bool], Dict[str, int], bool]:
         """ Iterate over all match records in the match list, and simulate
             if the match object accepts the graft offer.
 
@@ -624,10 +693,10 @@ class AcceptanceModule:
         max_offers: int
             maximum number of offers that will be made
             (rescue allocation is triggered after it)
-        max_offers_per_center: int
+        max_patient_rejections_per_center: int
             maximum number of offers per center that counts towards
-            triggering rescue allocation. Recipients will still be
-            offered the graft.
+            triggering rescue allocation. Recipients will not be offered
+            the graft after this many offers.
         center_willing_to_accept: Optional[Dict[str, bool]]
             Dictionary of center names with booleans whether they are
             willing to consider the graft or not.
@@ -639,8 +708,11 @@ class AcceptanceModule:
         if center_willing_to_accept is None:
             center_willing_to_accept = {}
 
+        if rej_per_center is not None:
+            n_rejections_per_center.update(rej_per_center)
+
         if len(match_list) == 0:
-            return None, {}, rescue_triggered
+            return None, center_willing_to_accept, n_rejections_per_center, rescue_triggered
 
         # If extended allocation has been triggered, order in offer
         # of extended allocation.
@@ -665,15 +737,20 @@ class AcceptanceModule:
         # (ii) it is the first offer to a center in non-HU/ACO RD allocation,
         # (iii) it is an offer to a filtered match list candidate
         for match_object in match_records_list:
+
+            object_dict = match_object.__dict__
+            rec_center = object_dict[cn.RECIPIENT_CENTER]
+
             # If more than max number of offers are made, break
             # to initiate rescue.
-            if max_offers and count_rejections_total >= max_offers:
+            if isinstance(max_offers, int) and count_rejections_total >= max_offers:
+                rescue_triggered = True
                 break
 
             # Skip patients who already rejected the offer.
             # This can happen in case a candidate rejected an
             # offer prior to rescue / extended allocation.
-            if match_object.__dict__.get(cn.ACCEPTANCE_REASON, None):
+            if object_dict.get(cn.ACCEPTANCE_REASON, None) is not None:
                 continue
 
             # Check whether offer is profile compatible.
@@ -681,43 +758,31 @@ class AcceptanceModule:
                 match_object.set_acceptance(reason=cn.FP)
                 continue
 
+
             # For profile compatible offers, initialize acceptance information
             if hasattr(match_object, '_initialize_acceptance_information'):
                 match_object._initialize_acceptance_information()
 
             # 1) determine whether center is willing to accept
-            if not (
-                match_object.__dict__[cn.RECIPIENT_CENTER] in
-                center_willing_to_accept
-            ):
+            if not (rec_center in center_willing_to_accept):
                 if self.determine_center_acceptance(
                     match_object,
                     k_previous_center_rejections=sum(
                         not value for _, value in center_willing_to_accept.items()
                     )
                 ):
-                    center_willing_to_accept[
-                        match_object.__dict__[cn.RECIPIENT_CENTER]
-                    ] = True
+                    center_willing_to_accept[rec_center] = True
                 else:
-                    center_willing_to_accept[
-                        match_object.__dict__[cn.RECIPIENT_CENTER]
-                    ] = False
+                    center_willing_to_accept[rec_center] = False
                     count_rejections_total += 1
 
             # 2) if center finds patient acceptable, make a patient-driven offer
-            if center_willing_to_accept.get(
-                match_object.__dict__[cn.RECIPIENT_CENTER],
-                False
-            ):
+            if center_willing_to_accept[rec_center]:
                 # Make offer if the center has received fewer than
-                # `max_offers_per_center` offers, or if rescue was
-                # triggered
+                # `max_patient_rejections_per_center` offers
                 if (
-                    n_rejections_per_center[
-                        match_object.__dict__[cn.RECIPIENT_CENTER]
-                    ] < max_offers_per_center
-                ) or match_object.donor.rescue:
+                    n_rejections_per_center[rec_center] < max_patient_rejections_per_center
+                ):
                     if self.determine_patient_acceptance(match_object):
                         match_objects.append(match_object)
                         # if two kidneys are available, and none were
@@ -733,35 +798,30 @@ class AcceptanceModule:
                                     verbose=self.verbose
                                 ) > match_object.patient.get_acceptance_prob()
                             ):
-                                match_object.__dict__[cn.ENBLOC] = 1
+                                object_dict[cn.ENBLOC] = 1
                                 n_kidneys_accepted += 2
                             else:
-                                match_object.__dict__[cn.ENBLOC] = 0
+                                object_dict[cn.ENBLOC] = 0
                                 n_kidneys_accepted += 1
                         else:
-                            match_object.__dict__[cn.ENBLOC] = 0
+                            object_dict[cn.ENBLOC] = 0
                             n_kidneys_accepted += 1
                         if n_kidneys_accepted == n_kidneys_available:
-                            return match_objects, center_willing_to_accept, rescue_triggered
+                            return match_objects, center_willing_to_accept, n_rejections_per_center, rescue_triggered
                         elif n_kidneys_accepted > n_kidneys_available:
                             raise Exception(
                                 f'{n_kidneys_accepted} candidate(s) have accepted the kidney,'
                                 f'while only {n_kidneys_available} were available.'
                             )
                     elif (
-                        match_object.__dict__[
-                            cn.ACCEPTANCE_REASON
-                            ] != cn.FP
+                        object_dict[cn.ACCEPTANCE_REASON] != cn.FP
                     ):
-                        n_rejections_per_center[
-                            match_object.__dict__[cn.RECIPIENT_CENTER]
-                            ] += 1
+                        n_rejections_per_center[rec_center] += 1
                         count_rejections_total += 1
-                else:
+                elif n_rejections_per_center[rec_center] >= max_patient_rejections_per_center:
                     # Else record center rejection (CR)
-                    match_object.set_acceptance(
-                        reason=cn.CR
-                    )
+                    match_object.set_acceptance(reason=cn.CR)
+                    center_willing_to_accept[rec_center] = False
             else:
                 # Else record center rejection (CR)
                 match_object.set_acceptance(
@@ -771,11 +831,11 @@ class AcceptanceModule:
         # If too little acceptances in regular allocation, return
         # the accepting match record.
         if len(match_objects) >= 0:
-            return match_objects, center_willing_to_accept, rescue_triggered
+            return match_objects, center_willing_to_accept, n_rejections_per_center, rescue_triggered
 
         # In case of no acceptance in regular allocation, return
         # center willingness to accept (to trigger rescue)
-        return None, center_willing_to_accept, rescue_triggered
+        return None, center_willing_to_accept, n_rejections_per_center, rescue_triggered
 
 
     def fe_coefs_to_dict(self, level: pd.Series, coef: pd.Series):

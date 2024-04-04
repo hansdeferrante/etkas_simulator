@@ -228,6 +228,15 @@ class MatchRecordCurrentETKAS(MatchRecord):
         # Information copied over manually
         self.__dict__[cn.D_MALIGNANCY] = self.donor.malignancy
         self.__dict__[cn.D_DRUG_ABUSE] = self.donor.drug_abuse
+        self.__dict__[cn.RESCUE] = self.donor.rescue
+        self.__dict__[cn.INTERNATIONAL_RESCUE] = (
+            self.__dict__[cn.MATCH_DISTANCE]=='I' and
+            self.donor.rescue == 1
+        )
+        self.__dict__[cn.NONLOCAL_ESP_DONOR] = (
+            self.__dict__[cn.MATCH_DISTANCE]!='L' and
+            self.__dict__[cn.D_AGE] >= es.AGE_ESP_ELIGIBLE
+        )
         self.__dict__[cn.VPRA_PERCENT] = self.__dict__[cn.VPRA]*100
 
         # Information
@@ -237,7 +246,6 @@ class MatchRecordCurrentETKAS(MatchRecord):
 
         # Determine match abroad (part of acceptance)
         self._determine_match_abroad()
-
 
     def _initialize_posttxp_information(
         self, ptp: PostTransplantPredictor
@@ -301,23 +309,38 @@ class MatchRecordCurrentETKAS(MatchRecord):
 
 
     def _determine_extalloc_priority(self):
-        """Prioritize local allocation in case of extended allocation."""
-        if (
-            self.__dict__[cn.RECIPIENT_COUNTRY] == mgr.GERMANY
+        """
+            Prioritize local allocation in case of extended allocation.
+            Note that immunized candidates are not eligible for
+            rescue / extended allocation.
+
+            Do not prioritize non-regional candidates in Belgium.
+            These grafts go abroad most of the time.
+        """
+        if (self.patient.vpra > 0):
+            self.__dict__[cn.EXT_ALLOC_PRIORITY] = -2
+        elif (
+            (self.allocation_national and self.__dict__[cn.DONOR_COUNTRY] != 'Belgium') or
+            (self.allocation_regional)
         ):
-            if self.allocation_regional:
-                self.__dict__[cn.EXT_ALLOC_PRIORITY] = 1
-            else:
-                self.__dict__[cn.EXT_ALLOC_PRIORITY] = 0
-        elif self.allocation_national:
             self.__dict__[cn.EXT_ALLOC_PRIORITY] = 1
+        elif (self.allocation_national and self.__dict__[cn.DONOR_COUNTRY] == 'Belgium'):
+            # In Belgium, do not prioritize non-regionals
+            self.__dict__[cn.EXT_ALLOC_PRIORITY] = -1
         else:
-            self.__dict__[cn.EXT_ALLOC_PRIORITY] = 0
+            if self.__dict__[cn.RECIPIENT_COUNTRY] in (
+                es.EXTALLOC_INTERNATIONAL_PRIORITY[
+                    self.__dict__[cn.DONOR_COUNTRY]
+                ]
+            ):
+                self.__dict__[cn.EXT_ALLOC_PRIORITY] = 0
+            else:
+                self.__dict__[cn.EXT_ALLOC_PRIORITY] = -1
 
 
     def _determine_match_abroad(self):
         """Determine match abroad"""
-        self.__dict__[cn.MATCH_ABROAD]: int = (
+        self.__dict__[cn.MATCH_ABROAD] = (
             0 if (
                 self.__dict__[cn.PATIENT_COUNTRY] ==
                 self.__dict__[cn.DONOR_COUNTRY]
@@ -550,6 +573,15 @@ class MatchRecordCurrentESP(MatchRecord):
         # Information copied over manually
         self.__dict__[cn.D_MALIGNANCY] = self.donor.malignancy
         self.__dict__[cn.D_DRUG_ABUSE] = self.donor.drug_abuse
+        self.__dict__[cn.RESCUE] = self.donor.rescue
+        self.__dict__[cn.INTERNATIONAL_RESCUE] = (
+            self.__dict__[cn.MATCH_DISTANCE]=='I' and
+            self.donor.rescue == 1
+        )
+        self.__dict__[cn.NONLOCAL_ESP_DONOR] = (
+            self.__dict__[cn.MATCH_DISTANCE]!='L' and
+            self.__dict__[cn.D_AGE] >= es.AGE_ESP_ELIGIBLE
+        )
         self.__dict__[cn.VPRA_PERCENT] = self.__dict__[cn.VPRA]*100
 
         # Information
@@ -609,15 +641,26 @@ class MatchRecordCurrentESP(MatchRecord):
                 self.__dict__[cn.ESP_PRIORITY] = 0
             else:
                 self.__dict__[cn.ESP_PRIORITY] = -1
-        elif donor_country in {mgr.BELGIUM, mgr.HUNGARY}:
+        elif donor_country == mgr.HUNGARY:
             if self.__dict__[cn.MATCH_LOCAL]:
                 self.__dict__[cn.ESP_PRIORITY] = 1
             elif self.__dict__[cn.MATCH_NATIONAL]:
                 self.__dict__[cn.ESP_PRIORITY] = 0
             else:
                 self.__dict__[cn.ESP_PRIORITY] = -1
+        elif donor_country == mgr.BELGIUM:
+            # In Belgium, ESP donors were accepted only 4 times
+            # nationally (not regionally) between 2016 and 2020.
+            # Filter to regional candidates only (as specified
+            # in match criteria).
+            if self.__dict__[cn.MATCH_LOCAL]:
+                self.__dict__[cn.ESP_PRIORITY] = 1
+            elif self.allocation_regional:
+                self.__dict__[cn.ESP_PRIORITY] = 0
+            else:
+                self.__dict__[cn.ESP_PRIORITY] = -1
         else:
-            if self.__dict__[cn.MATCH_NATIONAL]:
+            if self.__dict__[cn.MATCH_NATIONAL] or self.__dict__[cn.MATCH_LOCAL]:
                 self.__dict__[cn.ESP_PRIORITY] = 1
             else:
                 self.__dict__[cn.ESP_PRIORITY] = -1
@@ -681,15 +724,13 @@ class MatchRecordCurrentESP(MatchRecord):
             return False
         elif self.other_profile_compatible is False:
             return False
-        elif self.match_quality_compatible is False:
-            return False
+        # This is actually not used always, as not always
+        # the donor HLA is known for ESP donors.
+        # elif self.match_quality_compatible is False:
+        #     return False
         else:
-            if self.match_quality_compatible and self.other_profile_compatible and self.no_unacceptable_antigens:
+            if self.other_profile_compatible and self.no_unacceptable_antigens:
                 return True
-            print(
-                f'mq: {self.mq}, nounacc: {self.no_unacceptable_antigens}, opc: {self.other_profile_compatible}, mqc: {self.match_quality_compatible}\n'
-                f'unacc: {self.patient.unacceptables}'
-            )
 
     def __lt__(self, other):
         """Youngest obligation first (index then corresponds to age)."""

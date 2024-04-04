@@ -266,16 +266,17 @@ class MatchRecord:
         except:
             fdial = 'none'
         if cn.MTCH_TIER in self.__dict__:
-            tier_str = f'in tier {self.__dict__[cn.MTCH_TIER].ljust(2, " ")}'
+            tier_str = f' in tier {self.__dict__[cn.MTCH_TIER].ljust(2, " ")}'
         else:
             tier_str = ''
+        accr = self.__dict__.get(cn.ACCEPTANCE_REASON) if self.__dict__.get(cn.ACCEPTANCE_REASON) else ""
         return(
-            f'{self.determine_mismatch_string()} offer {tier_str} to '
+            f'{self.determine_mismatch_string()} offer{tier_str} to '
             f'{str(self.__dict__[cn.ID_RECIPIENT]).rjust(6, "0")} ({self.__dict__[cn.RECIPIENT_CENTER]}) '
             f'on {self.date_match.strftime("%Y-%m-%d")} '
             f'from {self.__dict__[cn.D_ALLOC_CENTER] } '
             f'with date first dial: {fdial} '
-            f'with {points_str} ({type(self).__name__})'
+            f'with {points_str} ({type(self).__name__}, {accr})'
         )
 
     def __lt__(self, other):

@@ -11,6 +11,7 @@ Scripts to read in input files.
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Tuple
 from functools import reduce
+from collections import defaultdict
 from numpy import ndarray, nan
 import pandas as pd
 import warnings
@@ -240,7 +241,7 @@ def read_patients(
 
 def read_rescue_baseline_hazards(
     input_path: str
-) -> Dict[str, ndarray]:
+) -> Tuple[Dict[str, ndarray], Tuple[str]]:
     """Read in rescue probabilities"""
     rescue_probs = pd.read_csv(
         input_path,
@@ -250,13 +251,30 @@ def read_rescue_baseline_hazards(
         rescue_probs = {
             n: x.iloc[:, 0:2] for n, x in rescue_probs.groupby('strata')
             }
-        rescue_probs = {
-            k: {
-                cn.N_OFFERS_TILL_RESCUE: v['offers_before_rescue'].to_numpy(),
-                cn.CBH_RESCUE: v['hazard'].to_numpy()
-            }
-            for k, v in rescue_probs.items()
-        }
+        rescue_prob_dict = defaultdict(dict)
+        strata_vars = None
+        for k, v in rescue_probs.items():
+            if ':' in k:
+                k1, k2 = k.split(':')
+                bh_var1, bh_var1_level = k1.split('-')
+                bh_var2, bh_var2_level = k2.split('-')
+                rescue_prob_dict[bh_var1_level].update(
+                    {
+                        bh_var2_level: {
+                            cn.N_OFFERS_TILL_RESCUE: v['offers_before_rescue'].to_numpy(),
+                            cn.CBH_RESCUE: v['hazard'].to_numpy()
+                        }
+                    }
+                )
+                strata_vars = (bh_var1, bh_var2)
+            else:
+                rescue_prob_dict[k] = {
+                    cn.N_OFFERS_TILL_RESCUE: v['offers_before_rescue'].to_numpy(),
+                    cn.CBH_RESCUE: v['hazard'].to_numpy()
+                }
+                strata_vars = (cn.DONOR_COUNTRY, )
+
+        return rescue_prob_dict, strata_vars
     else:
         rescue_probs = {
             nan: {
@@ -264,7 +282,7 @@ def read_rescue_baseline_hazards(
                 cn.CBH_RESCUE: rescue_probs.loc[:, 'hazard'].to_numpy()
             }
         }
-    return rescue_probs
+    return rescue_probs, None
 
 
 def read_donors(

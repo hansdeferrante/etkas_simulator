@@ -136,6 +136,7 @@ class Donor:
                 self.__dict__[cn.D_AGE_GROUP] = '50_to_64'
             else:
                 self.__dict__[cn.D_AGE_GROUP] = '65p'
+            self.__dict__[cn.ESP_DONOR] = str(int(age >= es.AGE_ESP_ELIGIBLE))
         self.__dict__[cn.D_HBSAG] = hbsag if hbsag is not None and  \
             hbsag is not np.nan else False
         self.__dict__[cn.D_HCVAB] = hcvab if hcvab is not None and \

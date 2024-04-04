@@ -1,0 +1,35 @@
+variable,variable_transformed,variable_transformation,level,coef
+intercept,,,,21.3985412223704
+donor_age,donor_age_over_40,over_40,,-0.0998774083810445
+donor_age,donor_age_over_75,over_75,,-0.000330784100289355
+donor_last_creat,donor_last_creat_over_0p5,over_0p5,,-0.643969163128273
+donor_last_creat,donor_last_creat_over_1,over_1,,-0.364583528340304
+donor_last_creat,donor_last_creat_over_1p5,over_1p5,,0.0257510051811471
+donor_last_creat,donor_last_creat_over_3p5,over_3p5,,1.34743641935009
+donor_diabetes,,,1,-0.543017846076018
+donor_hypertension,,,1,-0.0170279831177412
+d_bloodgroup,,,AB,3.1874826750421
+d_bloodgroup,,,B,0.201770912626747
+d_bloodgroup,,,O,-0.337924085952782
+donor_malignancy,,,1,0.0308927056918559
+graft_hbcab,,,1,-0.347748042801175
+donor_carrest,,,1,-0.191485526126512
+death_cause_group,,,CNS tumor,16.014514312676
+death_cause_group,,,CVA,0.032008179886286
+death_cause_group,,,Head trauma,0.228808633412581
+death_cause_group,,,Other,-0.0908740911083398
+driving_time,,,"",-0.023527085694026
+d_cmv,,,1,-0.0479302460409421
+d_urine_protein,,,1,-0.243023357800494
+d_urine_protein,,,2,-0.23472878818809
+d_urine_protein,,,3,-0.186945595413369
+patient_country,,,Belgium,-16.4382372826624
+patient_country,,,Croatia,-14.2243832576282
+patient_country,,,Germany,-15.4275067161583
+patient_country,,,Hungary,-16.8908552372941
+patient_country,,,Netherlands,-16.6203618371423
+graft_dcd,,,1,-0.146102268452387
+k_previous_center_rejections,,,1,-0.135247334594132
+k_previous_center_rejections,,,2,0.0865554102638949
+k_previous_center_rejections,,,3,0.605036641007837
+k_previous_center_rejections,,,4+,0.219061067428088

@@ -155,6 +155,8 @@ class ETKASS:
         self.hla_system = HLASystem(sim_set)
         self.bal_system = load_balances(sim_set)
         self.nonetkas_esp_transplants = load_nonetkasesp_balances(sim_set)
+        self.allow_discards = sim_set.get('ALLOW_DISCARDS', False)
+        self.total_number_nonacceptances = 0
 
         for bal_id, rcrd in self.nonetkas_esp_transplants.items():
             self.event_queue.add(
@@ -359,6 +361,52 @@ class ETKASS:
     def get_active_list(self, bg: str) -> ValuesView[Patient]:
         return self.active_lists.get_active_list(bg)
 
+
+    def process_nonacceptance(
+            self, donor: Donor,
+            match_records: List['AllocationSystem.MatchRecord'],
+            n_discards: int,
+            current_date: datetime
+        ):
+        """ Process in case the graft was declined by all patients/centers.
+            We either (i) force allocation to a FP-candidate or (ii) save
+            the graft as a discard.
+
+            Note that this happens very rarely (e.g. for HCV-positive donors.)
+        """
+
+        self.total_number_nonacceptances += n_discards
+
+        if match_records is None or self.allow_discards:
+            self.sim_results.save_discard(
+                donor=donor,
+                matchl_=match_records,
+                n_discarded=n_discards
+            )
+        elif match_records is not None:
+            filtered_match_records = list(
+                mr for mr in match_records
+                if mr.__dict__.get(cn.PROB_ACCEPT_P) is not None
+            )
+            filtered_match_records.sort(
+                key=lambda x: x.__dict__[cn.PROB_ACCEPT_P],
+                reverse=True
+            )
+            for mr in filtered_match_records:
+                if n_discards == 0:
+                    break
+                mr.__dict__[cn.ENBLOC] = 0
+                mr.set_acceptance(
+                    cn.T3
+                )
+                self.process_accepted_mr(
+                    current_date=current_date,
+                    donor=donor,
+                    accepted_mr=mr
+                )
+                n_discards -= 1
+
+
     def simulate_allocation(
             self,
             verbose: bool = False,
@@ -477,7 +525,7 @@ class ETKASS:
                     )
 
                      # Now determine which patient accepts the organ
-                    accepted_mrs_esp, center_willingness_esp, esp_rescue_triggered = (
+                    accepted_mrs_esp, center_willingness_esp, esp_rej_per_center, esp_rescue_triggered = (
                         self.acceptance_module.simulate_esp_allocation(
                             match_list_esp,
                             n_kidneys_available=donor.__dict__[cn.N_KIDNEYS_AVAILABLE]
@@ -504,6 +552,9 @@ class ETKASS:
                     match_list_esp = None
                     n_accepted_esp = 0
                     center_willingness_esp = None
+                    esp_rescue_triggered = False
+                    esp_rej_per_center = None
+
 
                 if (donor.__dict__[cn.N_KIDNEYS_AVAILABLE] - n_accepted_esp) > 0:
                     # Allocation via ETKAS. Construct an match-list with all patients
@@ -530,14 +581,8 @@ class ETKASS:
                         store_score_components=self.sim_set.STORE_SCORE_COMPONENTS,
                         travel_time_dict=self.dict_travel_times
                     )
-                    if self.verbose >= 3:
-                        for i, mr in enumerate(match_list_etkas.return_match_list()):
-                            print(mr)
-                            if i > 20:
-                                break
-                        input('Printed match list, press enter to continue.')
 
-
+                    # ESP organs are allocated via extended allocation in ETKAS
                     if donor.__dict__[cn.DONOR_AGE] >= self.age_esp:
                         match_list_etkas._initialize_extalloc_priorities()
 
@@ -549,7 +594,8 @@ class ETKASS:
                                 donor.__dict__[cn.N_KIDNEYS_AVAILABLE] - n_accepted_esp
                             ),
                             center_willingness=center_willingness_esp,
-                            esp_rescue=esp_rescue_triggered
+                            esp_rescue=esp_rescue_triggered,
+                            esp_rej_per_center=esp_rej_per_center
                         )
                     )
 
@@ -578,14 +624,6 @@ class ETKASS:
                     match_list_etkas = None
                     n_accepted_etkas = 0
 
-                # TODO: delete this piece of code.
-                if debug_id_donor is not None:
-                    if donor.__dict__[cn.ID_DONOR] == debug_id_donor:
-                        if match_list_esp:
-                            print(match_list_esp)
-                        if match_list_etkas:
-                            print(match_list_etkas)
-
                 if (n_discards := donor.__dict__[cn.N_KIDNEYS_AVAILABLE] - n_accepted_etkas - n_accepted_esp) != 0:
                     match_records = []
                     if match_list_esp is not None and len(match_list_esp) > 0:
@@ -594,11 +632,12 @@ class ETKASS:
                         match_records += match_list_etkas.return_match_list()
 
                     if match_records is not None:
-                        self.sim_results.save_discard(
+                        self.process_nonacceptance(
                             donor=donor,
-                            matchl_=match_records,
-                            n_discarded=n_discards
-                            )
+                            match_records=match_records,
+                            n_discards=n_discards,
+                            current_date=current_date
+                        )
 
             elif event.type_event == cn.BAL:
                 self.bal_system.add_balance_from_txp(

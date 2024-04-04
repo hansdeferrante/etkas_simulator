@@ -39,6 +39,17 @@ DEFAULT_ESP_ATTR_ORDER = (
     cn.TOTAL_MATCH_POINTS
 )
 
+EXTALLOC_INTERNATIONAL_PRIORITY = {
+    mgr.AUSTRIA: {mgr.GERMANY, mgr.CROATIA, mgr.HUNGARY, mgr.SLOVENIA},
+    mgr.BELGIUM: {mgr.GERMANY, mgr.NETHERLANDS},
+    mgr.CROATIA: {mgr.GERMANY, mgr.AUSTRIA, mgr.HUNGARY, mgr.SLOVENIA},
+    mgr.GERMANY: {},
+    mgr.HUNGARY: {mgr.GERMANY, mgr.AUSTRIA, mgr.CROATIA},
+    mgr.NETHERLANDS: {mgr.GERMANY},
+    mgr.SLOVENIA: {mgr.GERMANY, mgr.AUSTRIA}
+}
+
+
 AGE_ESP_ELIGIBLE = 65
 
 HLA_MQS = list(
@@ -99,15 +110,19 @@ PATH_DRIVING_TIMES = (
 # Paths relevant for the acceptance module
 ACCEPTANCE_PATHS = {
     k: DIR_ACCEPTANCE_COEFS + v for k, v in {
-        'rd': 'coefs_recipient_driven.csv',
-        'cd': 'coefs_center_acceptance.csv',
+        'etkas_rd': 'coefs_recipient_driven_ETKAS.csv',
+        'etkas_cd': 'coefs_center_acceptance_ETKAS.csv',
+        'esp_rd': 'coefs_recipient_driven_ESP.csv',
+        'esp_cd': 'coefs_center_acceptance_ESP.csv',
         'enbloc': 'coefs_enbloc.csv'
     }.items()
 }
 LR_TEST_FILES = {
     k: DIR_TEST_LR + v for k, v in {
-        'rd': 'acceptance_pd.csv',
-        'cd': 'acceptance_cd.csv',
+        'etkas_rd': 'acceptance_pd_ETKAS.csv',
+        'etkas_cd': 'acceptance_cd_ETKAS.csv',
+        'esp_rd': 'acceptance_pd_ESP.csv',
+        'esp_cd': 'acceptance_cd_ESP.csv',
         'enbloc': 'test_cases_enbloc.csv'
     }.items()
 }
@@ -120,7 +135,7 @@ POSTTXP_SURV_TESTPATHS = {None: DIR_TEST_LR + 'posttx_testcases.csv'}
 
 OFFER_INHERIT_COLS = {
     'donor': [
-        cn.D_AGE, cn.DEATH_CAUSE_GROUP,
+        cn.D_AGE, cn.ESP_DONOR, cn.DEATH_CAUSE_GROUP,
         cn.D_TUMOR_HISTORY, cn.D_MARGINAL_FREE_TEXT,
         cn.D_DCD, cn.D_DIABETES, cn.D_HYPERTENSION, cn.D_LAST_CREAT,
         cn.D_CARREST, cn.D_HBSAG, cn.D_HCVAB, cn.D_AGE,
