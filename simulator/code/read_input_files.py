@@ -433,6 +433,29 @@ def read_donor_pool(
     return data_
 
 
+
+def read_hla_match_potentials(
+    input_path: str,
+    datecols: Optional[List[str]] = None,
+    usecols: Optional[List[str]] = None,
+    **kwargs
+) -> pd.DataFrame:
+
+    if usecols is None:
+        usecols = list(dtypes.DTYPE_MATCH_POTENTIALS.keys())
+    data_ = pd.read_csv(input_path)
+    data_: pd.DataFrame = _read_with_datetime_cols(
+        input_path=input_path,
+        dtps=dtypes.DTYPE_MATCH_POTENTIALS,
+        casecols=False,
+        usecols=usecols,
+        datecols=datecols,
+        **kwargs
+    )
+    return data_
+
+
+
 def read_acos(input_path: str, **kwargs) -> pd.DataFrame:
     """"Read in patient file."""
 
@@ -575,12 +598,14 @@ def read_sim_settings(
         )
 
     sim_set['calc_etkas_score'] = MatchPointFunction(
-        intercept = sim_set[cn.POINTS_ETKAS.upper()]['INTERCEPT'],
+        intercept = sim_set[cn.POINTS_ETKAS.upper()].get('INTERCEPT', 0),
         coef = sim_set[cn.POINTS_ETKAS.upper()],
-        points_comp_to_group=es.POINT_COMPONENTS_TO_GROUP
+        points_comp_to_group=es.POINT_COMPONENTS_TO_GROUP,
+        point_multiplier = sim_set.get(cn.MULTIPLIER_ETKAS.upper()),
+        trafos = sim_set.get(cn.TRAFOS_ETKAS.upper())
     )
     sim_set['calc_esp_score'] = MatchPointFunction(
-        intercept = sim_set[cn.POINTS_ESP.upper()]['INTERCEPT'],
+        intercept = sim_set[cn.POINTS_ESP.upper()].get('INTERCEPT', 0),
         coef = sim_set[cn.POINTS_ESP.upper()],
         points_comp_to_group=es.POINT_COMPONENTS_TO_GROUP
     )

@@ -173,6 +173,21 @@ DTYPE_DONORLIST = {
 }
 
 
+DTYPE_MATCH_POTENTIALS = {
+    **{
+        cn.PATIENT_HLA: str
+    },
+    **{
+        hmp_name: float for hmp_name in
+        es.HLA_MATCH_POTENTIALS.keys()
+    },
+    **{
+        hmp_name.replace('hmp_', 'hlamismatchfreq_'): float for hmp_name in
+        es.HLA_MATCH_POTENTIALS.keys()
+    }
+}
+
+
 DTYPE_DONORBALLIST = {
     cn.D_DATE: object,
     cn.D_ALLOC_COUNTRY: str,

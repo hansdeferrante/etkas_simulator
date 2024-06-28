@@ -9,6 +9,7 @@ Created on Wed Feb  2 17:33:44 2022
 from datetime import timedelta, datetime
 from typing import List, Any, Dict, Optional, Type, Tuple, Union, Generator
 from itertools import count
+from copy import deepcopy
 import pandas as pd
 import numpy as np
 
@@ -101,6 +102,7 @@ class MatchRecord:
             (self.patient.age_days_at_listing + self.match_time - self.patient.listing_offset) /
             365.25
         )
+        self.__dict__[cn.D_AGE] = self.donor.__dict__[cn.D_AGE]
 
         # Match distances
         self._alloc_nat = None
@@ -134,6 +136,23 @@ class MatchRecord:
                 break
         else:
             self.__dict__[cn.ZERO_MISMATCH] = True
+
+
+        def __deepcopy__(self, memo):
+            # Create a new instance of the class
+            cls = self.__class__
+            result = cls.__new__(cls)
+            memo[id(self)] = result
+
+            # Copy all attributes, except for hla_system and bal_system
+            for k, v in self.__dict__.items():
+                if k in {'hla_system', 'bal_system', 'center_travel_times', 'calc_points'}:
+                    print(f"Shallow copy of {k}")
+                    setattr(result, k, v)  # Shallow copy
+                else:
+                    setattr(result, k, deepcopy(v, memo))  # Deep copy
+
+            return result
 
 
     @property

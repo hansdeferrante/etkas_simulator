@@ -3,7 +3,6 @@
 """
 Created on Fri 11-02-2022
 
-Script to develop the standard exception system.
 
 @author: H.C. de Ferrante
 """
@@ -50,12 +49,11 @@ if __name__ == '__main__':
 
     DUMMY_DATE = pd.Timestamp('2000-01-01')
     df_txp = pd.read_csv(
-        'raw_data/transplantations_detailed.csv',
+        'raw_data/transplantations_klundert.csv',
         dtype={
             cn.ID_DONOR: 'str', cn.ID_MTR: 'str', cn.ID_TXP: 'str',
             cn.ID_RECIPIENT: 'str', cn.ID_REGISTRATION: 'str'
-        },
-        nrows=5000
+        }
     )
     df_txp.loc[:, 'CURRENT_PATIENT_HLA'] = (
         rdr.fix_hla_string(df_txp.loc[:, 'CURRENT_PATIENT_HLA'])
@@ -174,13 +172,13 @@ if __name__ == '__main__':
     )
 
     df_structured_patient_hlas.to_csv(
-        'data/Klundert/patient_hlas.csv',
+        'X:/PRJ/Machine learning/afd/Hans_de_Ferrante/ETKAS/Klundert_ML_HLA/raw_data/patient_hlas.csv',
         index=False,
         sep=','
     )
 
     df_structured_donor_hlas.to_csv(
-        'data/Klundert/donor_hlas.csv',
+        'X:/PRJ/Machine learning/afd/Hans_de_Ferrante/ETKAS/Klundert_ML_HLA/raw_data/donor_hlas.csv',
         index=False,
         sep=','
     )

@@ -10,7 +10,7 @@ which are to some extent immodifiable are included.
 """
 
 from datetime import timedelta, datetime
-from typing import Any
+from typing import Any, Dict, TYPE_CHECKING, Union
 import numpy as np
 import simulator.magic_values.magic_values_rules as mgr
 import simulator.magic_values.column_names as cn
@@ -18,7 +18,13 @@ import simulator.magic_values.column_groups as cg
 import simulator.magic_values.magic_values_rules as mr
 from functools import reduce
 from operator import or_
+from math import exp
 from itertools import product, combinations
+
+if TYPE_CHECKING:
+    from simulator.code.current_etkas.CurrentETKAS import (
+        MatchRecordCurrentESP, MatchRecordCurrentETKAS
+    )
 
 DAYS_PER_YEAR = timedelta(days=365.25)
 DEFAULT_DATE_TIME = '%Y-%m-%d %H:%M:%S'
@@ -71,6 +77,66 @@ PROFILE_HLA_MQS = {
     hla: f'profile_hla{mq_str}' for hla, mq_str in zip(HLA_MQS, HLA_MQS_STR)
 }
 
+# ET and NHS mismatch definitions
+ET_MM_LEVELS = {
+    (0, 0, 0) : mr.FH,
+    (1, 0, 0) : mr.DR_plus,
+    (0, 1, 0) : mr.DR_plus,
+    (2, 0, 0) : mr.DR_plus,
+    (1, 1, 0) : mr.DR_plus,
+    (0, 2, 0) : mr.DR_plus,
+    (2, 1, 0) : mr.DR0,
+    (1, 2, 0) : mr.DR0,
+    (2, 2, 0) : mr.DR0,
+    (0, 0, 1) : mr.DR1,
+    (1, 0, 1) : mr.DR1,
+    (2, 0, 1) : mr.DR1,
+    (0, 1, 1) : mr.DR1,
+    (0, 2, 1) : mr.DR1,
+    (1, 1, 1) : mr.DR1,
+    (1, 2, 1) : mr.DR1,
+    (2, 1, 1) : mr.DR1,
+    (2, 2, 1) : mr.DR1,
+    (0, 0, 2) : mr.DR2,
+    (1, 0, 2) : mr.DR2,
+    (2, 0, 2) : mr.DR2,
+    (0, 1, 2) : mr.DR2,
+    (0, 2, 2) : mr.DR2,
+    (1, 1, 2) : mr.DR2,
+    (1, 2, 2) : mr.DR2,
+    (2, 1, 2) : mr.DR2,
+    (2, 2, 2) : mr.DR2
+}
+
+NHS_MM_LEVELS = {
+    (0, 0, 0) : '1',
+    (1, 0, 0) : '2',
+    (0, 1, 0) : '2',
+    (1, 1, 0) : '2',
+    (2, 0, 0) : '2',
+    (2, 1, 0) : '2',
+    (0, 0, 1) : '2',
+    (1, 0, 1) : '2',
+    (2, 0, 1) : '2',
+    (0, 2, 0) : '3',
+    (1, 2, 0) : '3',
+    (2, 2, 0) : '3',
+    (0, 1, 1) : '3',
+    (1, 1, 1) : '3',
+    (2, 1, 1) : '3',
+    (0, 2, 1) : '4',
+    (1, 2, 1) : '4',
+    (2, 2, 1) : '4',
+    (0, 0, 2) : '4',
+    (1, 0, 2) : '4',
+    (2, 0, 2) : '4',
+    (0, 1, 2) : '4',
+    (1, 1, 2) : '4',
+    (2, 1, 2) : '4',
+    (0, 2, 2) : '4',
+    (1, 2, 2) : '4',
+    (2, 2, 2) : '4'
+}
 
 # Transformations
 def identity(__x: Any):
@@ -83,10 +149,102 @@ def square(__x: Any):
     return __x**2
 
 
+def age_difference_filter(__m: Dict):
+    """Calculate age difference filter"""
+    d_age = __m[cn.D_AGE]
+    r_age = __m[cn.R_MATCH_AGE]
+
+    if abs(d_age-r_age) <= 5:
+        return 1
+    elif r_age > d_age:
+        return 1/exp(0.10*(r_age-d_age-5)**0.95)
+    else:
+        return 1/exp(0.02*(d_age-r_age-5)**0.75)
+
+def age_difference_filter_wrapped(__m: 'Union[MatchRecordCurrentETKAS, MatchRecordCurrentESP]') -> float:
+    """Calculate age difference filter"""
+    return age_difference_filter(__m.__dict__)
+
+
+def age_difference_filter_muted(__m: Dict):
+    """Calculate age difference filter"""
+    d_age = __m[cn.D_AGE]
+    r_age = __m[cn.R_MATCH_AGE]
+
+    if abs(d_age-r_age) <= 5:
+        return 1
+    elif r_age > d_age:
+        return 1/exp(0.015*(r_age-d_age-5)**0.95)
+    else:
+        return 1/exp(0.01*(d_age-r_age-5)**0.60)
+
+
+def construct_nhs_mm_level(__m: 'Union[MatchRecordCurrentETKAS, MatchRecordCurrentESP]') -> str:
+    return NHS_MM_LEVELS[ __m.mq]
+def construct_et_mm_level(__m: 'Union[MatchRecordCurrentETKAS, MatchRecordCurrentESP]') -> str:
+    return ET_MM_LEVELS[ __m.mq]
+def construct_decreasing_age_filter_45_75(__m: 'Union[MatchRecordCurrentETKAS, MatchRecordCurrentESP]') -> float:
+    r_age = __m.__dict__[cn.R_MATCH_AGE]
+    if r_age <= 45:
+        return 1
+    elif r_age >= 75:
+        return 0
+    else:
+        return 1 - (r_age - 45) / (75-45)
+def construct_increasing_age_filter_45_100(__m: 'Union[MatchRecordCurrentETKAS, MatchRecordCurrentESP]') -> float:
+    r_age = __m.__dict__[cn.R_MATCH_AGE]
+    if r_age <= 45:
+        return 0
+    elif r_age >= 100:
+        return 1
+    else:
+        return (r_age - 45) / (100-45)
+
+def exponential_base2(__x: float, base = 10):
+    """Calculate age difference filter"""
+    return (base**__x-1) / (base-1)
+
+def exponential_base5(__x: float, base = 10):
+    """Calculate age difference filter"""
+    return (base**__x-1) / (base-1)
+
+def exponential_base20(__x: float, base = 10):
+    """Calculate age difference filter"""
+    return (base**__x-1) / (base-1)
+
+def exponential_base10(__x: float, base = 10):
+    """Calculate age difference filter"""
+    return (base**__x-1) / (base-1)
+
+def exponential_base50(__x: float, base = 50):
+    """Calculate age difference filter"""
+    return (base**__x-1) / (base-1)
+
+def exponential_base1000(__x: float, base = 1000):
+    """Calculate age difference filter"""
+    return (base**__x-1) / (base-1)
+
 TRAFOS = {
     cn.IDENTITY_TRAFO: identity,
-    cn.LOG: np.log
+    cn.LOG: np.log,
+    cn.AGE_DIFFERENCE_FILTER: age_difference_filter,
+    cn.AGE_DIFFERENCE_FILTER_MUTED: age_difference_filter_muted,
+    cn.EXPONENTIAL_BASE2: exponential_base2,
+    cn.EXPONENTIAL_BASE5: exponential_base5,
+    cn.EXPONENTIAL_BASE20: exponential_base20,
+    cn.EXPONENTIAL_BASE10: exponential_base10,
+    cn.EXPONENTIAL_BASE50: exponential_base50,
+    cn.EXPONENTIAL_BASE1000: exponential_base1000
 }
+
+VARIABLE_CONSTRUCTION_FUNCTIONS = {
+    mr.ET_MISMATCH_LEVEL: construct_et_mm_level,
+    mr.NHS_MISMATCH_LEVEL: construct_nhs_mm_level,
+    cn.LINEAR_AGE_FILTER_45_75: construct_decreasing_age_filter_45_75,
+    cn.LINEAR_AGE_FILTER_45_100: construct_increasing_age_filter_45_100,
+    cn.AGE_DIFFERENCE_FILTER: age_difference_filter_wrapped
+}
+
 
 # Directory with simulation settings
 DIR_SIM_SETTINGS = 'simulator/sim_yamls/'
@@ -147,7 +305,7 @@ OFFER_INHERIT_COLS = {
     'patient': [
         cn.PATIENT_SEX, cn.URGENCY_CODE, cn.IS_RETRANSPLANT, cn.R_PED,
         cn.PATIENT_COUNTRY, cn.RECIPIENT_COUNTRY, cn.VPRA,
-        cn.RECIPIENT_REGION, cn.ID_REGISTRATION
+        cn.RECIPIENT_REGION, cn.ID_REGISTRATION, cn.AM_STATUS
     ]
 }
 
@@ -163,6 +321,8 @@ POSTTXP_MIN_MATCHES = 5
 POSTTXP_MATCH_CALIPERS = [20.0, 2.0, 1.0, 3]
 
 
+ACCEPTANCE_CODES = {cn.T1, cn.T3}
+
 def log_ceil(x):
     return np.log(np.ceil(x+2))
 
@@ -177,7 +337,7 @@ POSTTXP_COPY_VARS = [
 ]
 
 hlas_to_load = (
-    mr.HLA_A, mr.HLA_B, mr.HLA_DR
+    mr.HLA_A, mr.HLA_B, mr.HLA_DR, mr.HLA_DQB
 )
 
 # Allowed values for various factors.
@@ -234,14 +394,26 @@ COLS_TRANSPLANT_PROBS = list(
 POINT_GROUPS = {
     cn.POINTS_HLA: (cn.INTERCEPT, mr.MMB_HLA_A, mr.MMB_HLA_B, mr.MMS_HLA_DR),
     cn.POINTS_HLA_PED: (f'{var}:{cn.R_PED}' for var in (cn.INTERCEPT, mr.MMB_HLA_A, mr.MMB_HLA_B, mr.MMS_HLA_DR)),
+    cn.POINTS_HLA_AGE_MATCH: {
+        f'nhs_mm_level-{value}:{cn.R_PED}' for value in set(NHS_MM_LEVELS.values())
+    }.union(
+        {f'nhs_mm_level-{value}:{cn.LINEAR_AGE_FILTER_45_75}' for value in set(NHS_MM_LEVELS.values())}
+    ),
+    cn.POINTS_AGE: {cn.LINEAR_AGE_FILTER_45_100, cn.AGE_DIFFERENCE_FILTER},
     'nat_bal': (cn.BALANCE_NAT, ),
     'reg_bal': (cn.BALANCE_REG,),
     cn.POINTS_WAIT: (cn.YEARS_ON_DIAL, cn.PREVIOUS_WT),
     cn.POINTS_DIST: (cn.MATCH_LOCAL, cn.MATCH_INTERNATIONAL, cn.MATCH_NATIONAL),
     cn.POINTS_PED: (cn.R_PED,),
-    cn.POINTS_MMP: (cn.ET_MMP,),
-    cn.POINTS_HU: (cn.PATIENT_IS_HU,)
+    cn.POINTS_MMP: (cn.ET_MMP, ),
+    cn.POINTS_HAPLOTYPE_FREQUENCY: (cn.HLA_MISMATCHFREQ_1ABDR, cn.HLA_MISMATCHFREQ_FH,
+                                    cn.HLA_MISMATCHFREQ_1BDR, cn.HLA_MISMATCHFREQ_0DR),
+    cn.POINTS_HU: (cn.PATIENT_IS_HU,),
+    cn.POINTS_VPRA: (cn.VPRA,)
 }
+
+HAPLOTYPE_FREQUENCY_VARIABLES = set(POINT_GROUPS[cn.POINTS_HAPLOTYPE_FREQUENCY])
+
 POINT_COMPONENTS_TO_GROUP = {
     iv: group
     for group, it in POINT_GROUPS.items() for iv in it
@@ -261,6 +433,7 @@ OUTPUT_COLS_PATIENTS = (
     cn.EXIT_STATUS, cn.EXIT_DATE, cn.URGENCY_REASON,
     cn.FINAL_REC_URG_AT_TRANSPLANT,
     cn.LAST_NONNT_HU,
+    cn.DATE_FIRST_DIAL,
     cn.TIME_SINCE_PREV_TXP,
     cn.TYPE_RETX,
     cn.RECIPIENT_COUNTRY,
@@ -277,8 +450,8 @@ OUTPUT_COLS_PATIENTS = (
     cn.VALID_PRA,
     cn.ET_MMP,
     cn.ET_HLA_MISMATCHFREQ,
-    cn.HLA_MISMATCHFREQ,
-    cn.HZ_HLA_A, cn.HZ_HLA_B, cn.HZ_HLA_DR
+    cn.HZ_HLA_A, cn.HZ_HLA_B, cn.HZ_HLA_DR,
+    'hla'
 )
 OUTPUT_COLS_EXITS = (
     (
@@ -294,18 +467,20 @@ OUTPUT_COLS_EXITS = (
         cn.MATCH_DATE, cn.PATIENT_RANK,
         cn.RANK, cn.D_ALLOC_CENTER, cn.D_ALLOC_REGION,
         cn.D_ALLOC_COUNTRY, cn.R_MATCH_AGE, cn.R_PED,
-        cn.PATIENT_IS_HU,
-        cn.PATIENT_SEX,
+        cn.PATIENT_IS_HU, cn.PATIENT_SEX,
         cn.ANY_HU, cn.ACCEPTANCE_REASON,
         cn.OFFERED_TO, cn.DISEASE_GROUP, cn.DISEASE_SINCE,
         cn.PROFILE_COMPATIBLE, cn.TYPE_OFFER_DETAILED,
         cn.PROB_ACCEPT_C, cn.PROB_ACCEPT_P, cn.DRAWN_PROB, cn.DRAWN_PROB_C,
         cn.PROB_ENBLOC, cn.ENBLOC,
-        cn.TYPE_RECORD, cn.VPRA, cn.ET_MMP, cn.HLA_MISMATCHFREQ,
+        cn.TYPE_RECORD, cn.VPRA, cn.ET_MMP,
         cn.ET_HLA_MISMATCHFREQ, cn.HZ_HLA_A, cn.HZ_HLA_B, cn.HZ_HLA_DR,
         cn.EXT_ALLOC_PRIORITY, cn.EXT_ALLOC_TRIGGERED,
         cn.ALLOCATION_MECHANISM, cn.ALLOCATION_PROGRAM,
-        cn.PRA, cn.VALID_PRA
+        cn.PRA, cn.VALID_PRA,
+        cn.D_HYPERTENSION, cn.D_LAST_CREAT, cn.D_DIABETES,
+        cn.DEATH_CAUSE_GROUP, cn.D_MALIGNANCY,
+        cn.YEARS_ON_DIAL, cn.AM_STATUS
     ) + tuple(cg.MTCH_COLS) + tuple(COLS_TRANSPLANT_PROBS) +
     tuple(MISMATCH_STR_DEFINITION) + tuple(POINT_GROUPS.keys())
 )
@@ -329,7 +504,7 @@ MATCH_INFO_COLS = (
     cn.PATIENT_SEX, cn.PATIENT_RANK, cn.RANK, cn.ACCEPTED,
     cn.ACCEPTANCE_REASON, cn.PROB_ACCEPT_C, cn.PROB_ACCEPT_P, cn.DRAWN_PROB,
     cn.DRAWN_PROB_C, cn.PROFILE_COMPATIBLE,
-    cn.VPRA, cn.ET_MMP, cn.ET_HLA_MISMATCHFREQ, cn.HLA_MISMATCHFREQ,
+    cn.VPRA, cn.ET_MMP, cn.ET_HLA_MISMATCHFREQ,
     cn.HZ_HLA_A, cn.HZ_HLA_B, cn.HZ_HLA_DR,
     cn.PRA, cn.VALID_PRA
 ) + tuple(cg.MTCH_COLS) + tuple(POINT_GROUPS.keys())
@@ -390,3 +565,31 @@ MATCH_TO_SPLITS = {
 
 GROUP_SPECIFIC_SLOPE = 'group_specific_slope'
 REFERENCE = 'reference'
+
+def is_zero_mm(mm_dict):
+    try:
+        return(mm_dict['mmb_hla_a'] + mm_dict['mmb_hla_b'] + mm_dict['mms_hla_dr'] == 0)
+    except:
+        return None
+def is_at_most_1mm(mm_dict):
+    try:
+        return(mm_dict['mmb_hla_a'] + mm_dict['mmb_hla_b'] + mm_dict['mms_hla_dr'] <= 1)
+    except:
+        return None
+def is_at_most_1bdr(mm_dict):
+    try:
+        return(mm_dict['mmb_hla_b'] + mm_dict['mms_hla_dr'] <= 1)
+    except:
+        return None
+def is_no_dr_mm(mm_dict):
+    try:
+        return(mm_dict['mms_hla_dr'] == 0)
+    except:
+        return None
+
+HLA_MATCH_POTENTIALS = {
+    cn.HMP_FH: is_zero_mm,
+    cn.HMP_1ABDR: is_at_most_1mm,
+    cn.HMP_0DR: is_no_dr_mm,
+    cn.HMP_1BDR: is_at_most_1bdr
+}

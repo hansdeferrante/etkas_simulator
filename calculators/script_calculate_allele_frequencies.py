@@ -3,7 +3,6 @@
 """
 Created on Fri 11-02-2022
 
-Script to develop the standard exception system.
 
 @author: H.C. de Ferrante
 """

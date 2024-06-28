@@ -153,6 +153,8 @@ class ETKASS:
         self.verbose = verbose
         self.sim_rescue = sim_set.get('SIMULATE_RESCUE', False)
         self.hla_system = HLASystem(sim_set)
+        self.hla_system.match_potentials
+
         self.bal_system = load_balances(sim_set)
         self.nonetkas_esp_transplants = load_nonetkasesp_balances(sim_set)
         self.allow_discards = sim_set.get('ALLOW_DISCARDS', False)
@@ -384,10 +386,15 @@ class ETKASS:
                 n_discarded=n_discards
             )
         elif match_records is not None:
-            filtered_match_records = list(
-                mr for mr in match_records
-                if mr.__dict__.get(cn.PROB_ACCEPT_P) is not None
-            )
+            # Deduplicate list (in case candidate occurs in both ESP and ETKAS,
+            # take only ETKAS record).
+            filtered_match_records = list({
+                off.__dict__[cn.ID_RECIPIENT]: off
+                for off in match_records
+                if
+                off.__dict__.get(cn.PROB_ACCEPT_P) is not None and
+                off.__dict__.get(cn.ACCEPTANCE_REASON) not in es.ACCEPTANCE_CODES
+            }.values())
             filtered_match_records.sort(
                 key=lambda x: x.__dict__[cn.PROB_ACCEPT_P],
                 reverse=True

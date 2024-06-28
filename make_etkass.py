@@ -23,10 +23,12 @@ if __name__ == '__main__':
     sim_set = read_sim_settings(
                 os.path.join(
                     es.DIR_SIM_SETTINGS,
-                    '2024-03-19',
-                    'CurrentETKAS_validation_1_1.yml'
+                    '2024-06-27',
+                    'CurrentETKAS_vPRA_sliding_scale_b2_150p_2_2.yml'
                 )
             )
+    #sim_set.SIM_END_DATE = datetime(year=2016, month=3, day=31)
+    sim_set.SAVE_MATCH_LISTS=True
 
     # Read in simulation settings
     simulator = ETKASS(

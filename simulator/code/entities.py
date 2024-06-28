@@ -8,12 +8,14 @@ Created on Wed Feb  2 17:33:44 2022
 
 import warnings
 from typing import List, Dict, Tuple, Optional, Callable, DefaultDict, Union, Any, Set
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, date, time
 from math import isnan, prod
 from copy import deepcopy, copy
 from warnings import warn
-from collections import defaultdict, deque
+from collections import defaultdict, deque, Counter
+from itertools import zip_longest
 
+import time
 import yaml
 import pandas as pd
 import numpy as np
@@ -247,6 +249,45 @@ class Donor:
             f', dcd: {self.graft_dcd}, bg: {self.d_bloodgroup}'
             f' and age {self.__dict__[cn.D_AGE] }'
             )
+
+
+    @classmethod
+    def from_dummy_donor(cls, **kwargs):
+        # Provide default arguments
+        default_args = {
+            'id_donor': 1255,
+            'donor_country': 'Belgium',
+            'donor_region': 'BLGTP',
+            'donor_center': 'BLGTP',
+            'bloodgroup': 'O',
+            'reporting_date': pd.Timestamp('2000-01-01'),
+            'weight': 50,
+            'donor_dcd': False,
+            'hla': None,
+            'hla_system': None,
+            'hypertension': False,
+            'diabetes': False,
+            'cardiac_arrest': False,
+            'last_creat': 1.5,
+            'smoker': False,
+            'age': 45,
+            'hbsag': False,
+            'hcvab': False,
+            'hbcab': False,
+            'sepsis': False,
+            'meningitis': False,
+            'malignancy': False,
+            'drug_abuse': False,
+            'euthanasia': False,
+            'rescue': False,
+            'death_cause_group': 'Anoxia',
+            'n_kidneys_available': 2,
+            'urine_protein': 1,
+            'cmv': False
+        }
+        # Update default arguments with provided kwargs
+        default_args.update(kwargs)
+        return cls(**default_args)
 
     @property
     def needed_match_info(self):
@@ -500,6 +541,7 @@ class Patient:
         self._dcd_country = None
         self._eligibility_last_assessed = -1e10
         self._time_dial_at_listing = None
+        self._reduced_hla = None
 
     def set_diag(self, upd: StatusUpdate):
         if self.__dict__[cn.DISEASE_GROUP] != upd.status_detail:
@@ -563,6 +605,7 @@ class Patient:
         else:
             self.hla_broads = None
             self.hla_splits = None
+            self._reduced_hla = None
 
     def set_urgency_code(self, code: str, reason: Optional[str] = None):
         """Update urgency code with string"""
@@ -679,7 +722,7 @@ class Patient:
     def get_et_mmp(self) -> float:
         """Calculates the ET mismatch probability, under the assumption that
             HLAs, blood types, and unacceptables are independent. This is how
-            ET calculates the mismatch probability
+            ET calculates the mismatch probability.
         """
         if self._et_mmp:
             return self._et_mmp
@@ -695,6 +738,37 @@ class Patient:
             return self._et_mmp
         else:
             raise Exception('Cannot calculate ET-MMP, without hla system.')
+
+
+    def get_hla_mismatchfreqs(self) -> Dict[str, float]:
+        """Get the HLA mismatch frequency, i.e. the probability
+            no suitable donor among next 1,000 based on counting
+            (and only based on HLA)
+        """
+        if self.__dict__.get(cn.HLA_MISMATCHFREQ):
+            return self.__dict__[cn.HLA_MISMATCHFREQ]
+        elif isinstance(self.hla_system, HLASystem):
+            if self.hla not in self.hla_system.match_potentials:
+                print(f'Warning: re-calculating match potential for {self.hla}')
+                hmps = self.hla_system.calculate_hla_match_potential(
+                    self,
+                    hla_match_pot_definitions=es.HLA_MATCH_POTENTIALS
+                )
+                hla_matchfreqs = {
+                    k.replace('hmp_', 'hlamismatchfreq_'): round(100*(1-v)**1000, 5)
+                    for k, v in hmps.items()
+                }
+                self.hla_system.match_potentials[self.hla] = {
+                    **hmps,
+                    **hla_matchfreqs
+                }
+            self.__dict__[cn.HLA_MISMATCHFREQ] = (
+                self.hla_system.match_potentials[self.hla]
+            )
+            return self.__dict__[cn.HLA_MISMATCHFREQ]
+        else:
+            raise Exception('Cannot calculate mismatch frequency, without hla system.')
+
 
     def get_age_at_update_time(self, t: float) -> int:
         """Return age at time t (in days)"""
@@ -981,8 +1055,8 @@ class Patient:
         self.set_dial_date(dt)
 
     def _update_hla(self, upd: StatusUpdate):
-        self.__dict__[cn.HLA_MISMATCHFREQ] = float(upd.status_detail)
         self.set_match_hlas(upd.status_value)
+        self._reduced_hla = None
         self._et_mmp = None
         self._homozygosity_level = None
         self._homozygosity_per_locus = None
@@ -1086,6 +1160,15 @@ class Patient:
             )
         return self._active
 
+    @property
+    def reduced_hla(self):
+        if self._reduced_hla is None:
+            self._reduced_hla = ' '.join(
+                sorted(self.hla_broads[mgr.HLA_A].union(self.hla_broads[mgr.HLA_B]).union(self.hla_splits[mgr.HLA_DR]))
+            )
+        return self._reduced_hla
+
+
     def is_initialized(self) -> bool:
         """Whether future statuses have been loaded for the patient"""
         return self.initialized
@@ -1093,6 +1176,22 @@ class Patient:
     def _print_dict(self, dic) -> None:
         """Method to print a dictionary."""
         print(' '.join([f'{k}: {str(v).ljust(4)}\t' for k, v in dic.items()]))
+
+
+    def __deepcopy__(self, memo):
+            # Create a new instance of the patient, but do not copy hla_system
+            cls = self.__class__
+            result = cls.__new__(cls)
+            memo[id(self)] = result
+
+            # Copy all attributes, except for hla_system and bal_system
+            for k, v in self.__dict__.items():
+                if k in {'hla_system', 'bal_system', 'center_travel_times', 'calc_points'}:
+                    setattr(result, k, v)  # Shallow copy
+                else:
+                    setattr(result, k, deepcopy(v, memo))  # Deep copy
+
+            return result
 
     def __str__(self):
         if self.__dict__[cn.EXIT_STATUS] is not None:
@@ -1410,6 +1509,7 @@ class HLASystem:
 
         self.mmp_loci_splits = tuple(self.sim_set.get('LOCI_MMP_SPLIT', self.needed_split_mismatches))
         self.mmp_loci_broads = tuple(self.sim_set.get('LOCI_MMP_BROAD', self.needed_broad_mismatches))
+        self.mmp_loci = set(self.mmp_loci_splits + self.mmp_loci_broads)
 
         self._needed_mms = None
         self.k_needed_mms = (
@@ -1424,6 +1524,8 @@ class HLASystem:
             self.bg_frequencies: Dict[str, float] = yaml.load(file, Loader=yaml.FullLoader)
 
         self._donor_pool_hlas = None
+        self._structured_donor_pool = None
+        self._match_potentials = None
 
 
     def return_all_antigens(self, input_string: str) -> Set[str]:
@@ -1555,6 +1657,21 @@ class HLASystem:
         return structured_antigens
 
 
+    def _return_broad_mismatches(
+        self,
+        d: Donor,
+        p: Patient,
+        loci: Optional[Set[str]] = None
+    ) -> Dict[str, Optional[Set[str]]]:
+        return {
+            locus: hla_values.difference(p.hla_broads[locus])
+            if locus in p.hla_broads and len(p.hla_broads[locus]) > 0
+            else None
+            for locus, hla_values in d.hla_broads.items()
+            if (locus in loci or loci is None)
+        }
+
+
     def _determine_broad_mismatches(
             self,
             d: Donor,
@@ -1600,6 +1717,55 @@ class HLASystem:
                 mm[locus] = len(d_match_hlas.difference(r_match_hlas)) if len(r_match_hlas) > 0 else None
         return mm
 
+
+    def _return_split_mismatches(self, d: Donor, p: Patient, loci: Optional[Set[str]] = None):
+        """Determine mismatches at the split level.
+
+        This function falls back to matching at the broad level, if splits are unknown.
+        """
+        if loci is None:
+            loci = d.hla_splits.keys()
+        mm = {
+            locus: hla_values.difference(p.hla_splits[locus])
+            if locus in p.hla_splits and len(p.hla_splits[locus]) > 0
+            else None
+            for locus, hla_values in d.hla_splits.items()
+            if locus in loci
+        }
+        for locus in loci:
+            if len(d.hla_splits[locus]) < len(d.hla_broads[locus]):
+                common_broads = d.hla_broads[locus].intersection(p.hla_broads[locus])
+                r_match_hlas = copy(p.hla_broads[locus])
+                d_match_hlas = copy(d.hla_broads[locus])
+                for cb in common_broads:
+                    if cb in self.splittable_broads[locus]:
+                        rs = self.broads_to_splits[locus][cb].intersection(p.hla_splits[locus])
+                        if rs:
+                            ds = self.broads_to_splits[locus][cb].intersection(d.hla_splits[locus])
+                            if ds:
+                                r_match_hlas.union(rs).remove(cb)
+                                d_match_hlas.union(rs).remove(cb)
+                mm[locus] = d_match_hlas.difference(r_match_hlas) if len(r_match_hlas) > 0 else None
+        return mm
+
+
+    def return_mismatches(self, d: Donor, p: Patient, safely: bool = True):
+        mm = {
+            **{f'mmb_{k}': v for k, v in self._return_broad_mismatches(d=d, p=p, loci=self.needed_broad_mismatches).items()},
+            **{f'mms_{k}': v for k, v in self._return_split_mismatches(d=d, p=p, loci=self.needed_split_mismatches).items()}
+        }
+        if self._needed_mms is None:
+            self._needed_mms = set(mm.keys())
+
+        if safely and len(mm) != self.k_needed_mms:
+            return None
+        else:
+            try:
+                mm[cn.MM_TOTAL] = sum(len(mm_set for mm_set in mm.values()))
+                return mm
+            except:
+                return mm
+
     def determine_mismatches(self, d: Donor, p: Patient, safely: bool = True):
         mm = {
             **{f'mmb_{k}': v for k, v in self._determine_broad_mismatches(d=d, p=p, loci=self.needed_broad_mismatches).items()},
@@ -1616,6 +1782,108 @@ class HLASystem:
                 return mm
             except:
                 return mm
+
+    def _return_repeat_mismatches(self, d1: Donor, d2: Donor, p: Patient):
+
+        d1_mm_dict = self.return_mismatches(
+            d=d1,
+            p=p,
+            safely=False
+        )
+        d2_mm_dict = self.return_mismatches(
+            d=d2,
+            p=p,
+            safely=False
+        )
+
+        repeat_antigens = {
+            'broad': {
+                locus: d1_allele.intersection(d2.hla_broads[locus])
+                for locus, d1_allele in d1.hla_broads.items()
+            },
+            'split': {
+                locus: d1_allele.intersection(d2.hla_splits[locus])
+                for locus, d1_allele in d1.hla_splits.items()
+            }
+        }
+
+        repeat_mismatched_antigens = {
+            'broad': {
+                locus: rp_antigens_broad.difference(p.hla_broads[locus])
+                for locus, rp_antigens_broad in repeat_antigens['broad'].items()
+            },
+            'split': {
+                locus: rp_antigens_broad.difference(p.hla_splits[locus])
+                for locus, rp_antigens_broad in repeat_antigens['split'].items()
+            }
+        }
+
+        # Transpose the dictionary using dictionary comprehension
+        rmms = {
+            locus: {'broad': set(allele for allele in repeat_mismatched_antigens['broad'].get(locus, [])),
+                'split': set(allele for allele in repeat_mismatched_antigens['split'].get(locus, []))}
+            for locus in set(repeat_mismatched_antigens['split'].keys()) | set(repeat_mismatched_antigens['broad'].keys())
+        }
+        ras = {
+            locus: {'broad': set(allele for allele in repeat_antigens['broad'].get(locus, [])),
+                'split': set(allele for allele in repeat_antigens['split'].get(locus, []))}
+            for locus in set(repeat_antigens['split'].keys()) | set(repeat_antigens['broad'].keys())
+        }
+
+        return rmms, ras
+
+
+    def determine_repeat_mismatches(self, d1: Donor, d2: Donor, p: Patient):
+        # A repeat mismatch is defined as:
+        # (i)   a broad antigen shared by both donors, not shared by the patient
+        # (ii)  a split antigen in class 2 shared by both donors, if different from the
+        #       recipient antigen
+
+        rmms, donor_shared_antigens = self._return_repeat_mismatches(d1=d1, d2=d2, p=p)
+        CLASS_2_LOCI = ('hla_dr', 'hla_dq', 'hla_dp')
+
+        # Shared broads by donor and patients on class 2 loci.
+        # Also check whether the splits are completely known.
+        shared_broads = {
+                locus: d['broad'].intersection(p.hla_broads[locus])
+                for locus, d in donor_shared_antigens.items()
+                if locus in CLASS_2_LOCI
+            }
+        splits_known = {
+            locus: {
+                sb: (
+                (len(p.hla_splits[locus].intersection(self.broads_to_splits[locus][sb])) > 0) &
+                (len(d1.hla_splits[locus].intersection(self.broads_to_splits[locus][sb])) > 0) &
+                (len(d2.hla_splits[locus].intersection(self.broads_to_splits[locus][sb])) > 0)
+            ) if not sb in self.unsplittable_broads
+                else 1
+                for sb in sbs
+            }
+            for locus, sbs in shared_broads.items()
+        }
+
+        # Dictionary of repeat mismatches, and repeat mismatch strings.
+        repeat_mismatches = defaultdict(float)
+        rmm_strings = defaultdict(str)
+        for locus, rmm_per_locus in rmms.items():
+            # (i) a broad antigen shared by both donors, not shared by the patient
+            if (len(rmm_per_locus['broad']) > 0):
+                repeat_mismatches[locus] += 1
+                rmm_strings[locus] += ' '.join(atg for atg in rmm_per_locus['broad'])
+            # (ii) if split antigens are completely known, a split antigen in class 2
+            #      is shared by the donors, but not by the recipient, also RMM
+            if locus in CLASS_2_LOCI:
+
+                for shared_broad in shared_broads[locus]:
+                    if splits_known[locus][shared_broad]:
+                        repeat_mismatches[locus] = len(rmm_per_locus['split'])
+                        rmm_strings[locus] += " ".join(atg for atg in rmm_per_locus["split"])
+                    else:
+                        repeat_mismatches[locus] = np.nan
+                        rmm_strings[locus] += f'AMBIGUOUS_{shared_broad}'
+
+        any_repeat_mismatches = sum(repeat_mismatches.values())
+        return any_repeat_mismatches, repeat_mismatches, " ".join(rmm_strings.values())
 
     def _calc_et_prob1mm(
             self,
@@ -1634,6 +1902,7 @@ class HLASystem:
         prob_match_per_locus = {
             locus: sum(freqs[locus].get(antigen, 1e-4) for antigen in list(antigens))
             for locus, antigens in hlas.items()
+            if locus in self.mmp_loci
         }
 
         # Probability of 0 mismatches in total
@@ -1717,7 +1986,8 @@ class HLASystem:
             **kwargs
         ) -> Tuple[float, float]:
         """This function calculates the ET donor mismatch probability.
-        It returns the ET donor MMP, and ET HLA-mismatch frequency."""
+        It returns the ET donor MMP, and ET HLA-mismatch frequency.
+        """
 
         MMP0, MMP1 = self._calc_et_prob1mm(
             **kwargs
@@ -1770,7 +2040,7 @@ class HLASystem:
     def calculate_et_donor_mmps(self, p: Patient) -> Tuple[Dict[str, float], Dict[str, float]]:
         """Calculate ET donor mismatch probabilities and ET donor mismatch frequencies.
 
-        Note that these calculations assume:
+        Note that both these definitions assume:
             (i) independence between HLA on the loci,
             (ii) independence between vPRA, BG, and HLA
         """
@@ -1818,6 +2088,161 @@ class HLASystem:
         else:
             return 0
 
+
+    def calculate_hla_match_potential(
+            self, p: Patient,
+            hla_match_pot_definitions: Dict[str, Callable]
+        ) -> Dict[str, float]:
+        """Calculate HLA-match potentials, i.e. only based on MM-dict.
+        """
+
+        mm_dicts = list(
+            self.determine_mismatches(d=d, p=p)
+            for d in self.structured_donor_pool_hlas
+        )
+
+        hmps = {
+            hmp_name: sum(hmp_fun(mm_dict) for mm_dict in mm_dicts if hmp_fun(mm_dict) is not None) /
+            sum(1 for mm_dict in mm_dicts if hmp_fun(mm_dict) is not None)
+            if sum(1 for mm_dict in mm_dicts if hmp_fun(mm_dict) is not None) > 0
+            else np.nan
+            for hmp_name, hmp_fun in hla_match_pot_definitions.items()
+        }
+
+        return hmps
+
+    def _calculate_gilks_weights(
+        self,
+        patient_hla_pool: List[Patient],
+        pool_date: date
+    ) -> Tuple[List[Dict[int, float]], List[Dict[int, float]], Set[int]]:
+
+        # Construct patient weight based on waiting time.
+        print('Calculating patient weights (based on waiting time)')
+        patient_weights = np.array(
+            list(
+                min(
+                    p.future_statuses.return_time_to_exit(es.TERMINAL_STATUSES + [cn.FU]) if
+                    p.future_statuses is not None else 9999,
+                    (pool_date - p.__dict__[cn.LISTING_DATE]).days
+                ) for p in patient_hla_pool
+            )
+        )
+
+        # Calculate mismatches for the patient pool, which we use to calculate
+        # the needed alphas and betas.
+        print('Calculating weights as in Gilks (1991)')
+        betas_list = list()
+        alphas_list = list()
+        for i, d in enumerate(self.structured_donor_pool_hlas):
+
+            if (i % 100) == 0:
+                print(f'{i} out of {len(self.structured_donor_pool_hlas)} betas/alphas calculated')
+
+            # Construct mismatch list for patient
+            mm_dicts_list = list(
+                {
+                    cn.D_BLOODGROUP: d.d_bloodgroup,
+                    cn.MM_TOTAL: self.determine_mismatches(d=d, p=p)
+                } for p in patient_hla_pool
+            )
+            for mm_dict_el in mm_dicts_list:
+                if mm_dict_el[cn.MM_TOTAL] is None:
+                    mm_dict_el[cn.MM_TOTAL] = np.nan
+                else:
+                    mm_dict_el[cn.MM_TOTAL] = abs(mm_dict_el[cn.MM_TOTAL].get(cn.MM_TOTAL, np.nan))
+
+            mmds = np.array(list(mmd['mm_total'] for mmd in mm_dicts_list))
+
+            betas_list.append(
+                defaultdict(
+                    int,
+                    {
+                        int(uv): sum(patient_weights * (mmds == uv)) / sum(patient_weights)
+                        for uv in sorted(np.unique(mmds[~np.isnan(mmds)]))
+                    }
+                )
+            )
+
+        # Construct alphas by normalizing the betas
+        unique_keys = set().union(*(d.keys() for d in betas_list))
+        alphas_list = list(
+            {l: sum(beta_dict[iv] for iv in range(0, l, 1)) for l in unique_keys}
+            for beta_dict in betas_list
+        )
+        return alphas_list, betas_list, unique_keys
+
+
+    def calculate_gilks_matchability(
+            self,
+            patient_hla_pool: List[Patient],
+            patients: List[Patient],
+            pool_date: date,
+            match_list_size_bg: Optional[Dict[str, int]] = None,
+            sel_match_level: int = 1
+        ) -> np.ndarray:
+        """Calculate matchability based on Gilks, 1991
+        """
+
+        if match_list_size_bg is None:
+            match_list_size_bg = {
+                mgr.A: 3600,
+                mgr.O: 4800,
+                mgr.AB: 450,
+                mgr.B: 1700
+            }
+
+        alphas_list, betas_list, unique_keys = self._calculate_gilks_weights(
+            patient_hla_pool=patient_hla_pool,
+            pool_date=pool_date
+        )
+
+        print('Determining offer probabilities & matchability scores.')
+        offer_probs_by_bg = {
+            bg: list(
+                {
+                    i: (
+                        ((1 - alphas[i])**(m-1) - (1-alphas[i]-betas[i])**(m-1)) * alphas[i] / betas[i] +
+                        2 * ((1-alphas[i])**m - (1 - alphas[i] - betas[i])**m) / (m*betas[i]) -
+                        (1 - alphas[i] - betas[i])**(m-1)
+                    ) if betas[i] > 0 else
+                    (m - 1) * alphas[i] * (1-alphas[i])**(m-2) + (1-alphas[i])**(m-1)
+                    for i in unique_keys
+                } for
+                alphas, betas in zip(alphas_list, betas_list)
+            ) for bg, m in match_list_size_bg.items()
+        }
+
+        matchabilities = np.zeros(shape = len(patients))
+        for i, p in enumerate(patients):
+            if i % 100 == 0:
+                print(f'Processed {i} out of {len(patients)} patients.')
+
+            # Construct mismatch dictionary
+            mm_dict = list({
+                    cn.D_BLOODGROUP: d.d_bloodgroup,
+                    cn.MM_TOTAL: self.determine_mismatches(d=d, p=p)
+                } for d in self.structured_donor_pool_hlas
+            )
+            for mm_dict_el in mm_dict:
+                if mm_dict_el[cn.MM_TOTAL] is None:
+                    mm_dict_el[cn.MM_TOTAL] = np.nan
+                else:
+                    mm_dict_el[cn.MM_TOTAL] = abs(mm_dict_el[cn.MM_TOTAL].get(cn.MM_TOTAL, np.nan))
+
+            # if mismatch dictionary exists, set matchability
+            if mm_dict is not None:
+                bg_identical = np.array(list((1 if d is not None and p.bloodgroup == d[cn.D_BLOODGROUP] else 0 for d in mm_dict)))
+                offer_probs = np.array(list(mq_d[d_d[cn.MM_TOTAL]] if d_d is not None and not isnan(d_d[cn.MM_TOTAL]) else 0 for mq_d, d_d in zip(offer_probs_by_bg[p.bloodgroup], mm_dict)))
+                favorable_match = np.array(list((1 if d is not None and d[cn.MM_TOTAL] <= sel_match_level else 0 for d in mm_dict)))
+
+                matchabilities[i] = np.nansum(bg_identical * offer_probs * favorable_match) / len(mm_dict)
+            else:
+                matchabilities[i] = np.nan
+
+        return(matchabilities)
+
+
     @property
     def donor_pool_hlas(self):
         if self._donor_pool_hlas is not None:
@@ -1832,6 +2257,42 @@ class HLASystem:
         else:
             raise Exception(
                 "Specify a path to a donor pool to calculate vPRAs in the yml file."
+            )
+
+    @property
+    def structured_donor_pool_hlas(self):
+        if self._structured_donor_pool is not None:
+            return self._structured_donor_pool
+        elif self.sim_set.PATH_DONOR_POOL is not None:
+            df_don_pool = rdr.read_donor_pool(self.sim_set.PATH_DONOR_POOL)
+            df_don_pool_hlas = df_don_pool.loc[:, [cn.ID_DONOR, cn.D_BLOODGROUP, cn.DONOR_HLA]].drop_duplicates()
+            self._structured_donor_pool = list(
+                Donor.from_dummy_donor(
+                    bloodgroup = bg,
+                    hla=s,
+                    hla_system=self
+                )
+                for s, bg in zip(df_don_pool_hlas.donor_hla, df_don_pool_hlas.d_bloodgroup)
+            )
+            return self._structured_donor_pool
+        else:
+            raise Exception(
+                "Specify a path to a donor pool to calculate vPRAs in the yml file."
+            )
+
+    @property
+    def match_potentials(self):
+        if self._match_potentials is not None:
+            return self._match_potentials
+        elif self.sim_set.PATH_MATCH_POTENTIALS is not None:
+            df_match_potentials = rdr.read_hla_match_potentials(self.sim_set.PATH_MATCH_POTENTIALS)
+            self._match_potentials = (
+                df_match_potentials.set_index(cn.PATIENT_HLA).to_dict(orient='index')
+            )
+            return self._match_potentials
+        else:
+            raise Exception(
+                "Specify a path to match potentials to calculate vPRAs in the yml file."
             )
 
 class InternationalTransplantation:

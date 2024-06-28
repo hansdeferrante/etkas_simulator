@@ -59,6 +59,7 @@ class SimResults:
             sim_set: DotDict
     ):
         self.cols_to_save_exit = cols_to_save_exit
+        self.cols_to_save_txp = cols_to_save_exit
         self.cols_to_save_discard = cols_to_save_discard
         self.cols_to_save_patients = cols_to_save_patients
         self.transplantations = []
@@ -79,11 +80,21 @@ class SimResults:
             sim_set.RESULTS_FOLDER + sim_set.PATH_MATCH_LISTS
         )
 
-        self.path_obligations: str = (
-            sim_set.RESULTS_FOLDER +
-            f'obls_k{sim_set.SEED}_s{sim_set.SEED}.csv'
-        )
-
+        # Additional mismatches on loci to save.
+        if sim_set.MATCHES_AT_TRANSPLANT_BROAD:
+            self.broad_loci_to_save = set(sim_set.MATCHES_AT_TRANSPLANT_BROAD)
+            self.cols_to_save_txp = self.cols_to_save_txp + tuple(
+                'mmb_' + locus for locus in self.broad_loci_to_save
+                )
+        else:
+            self.broad_loci_to_save = None
+        if sim_set.MATCHES_AT_TRANSPLANT_SPLIT:
+            self.split_loci_to_save = set(sim_set.MATCHES_AT_TRANSPLANT_SPLIT)
+            self.cols_to_save_txp = self.cols_to_save_txp + tuple(
+                'mms_' + locus for locus in self.split_loci_to_save
+                )
+        else:
+            self.split_loci_to_save = None
         self.save_ml: bool = sim_set.SAVE_MATCH_LISTS
 
     def save_transplantation(
@@ -101,7 +112,7 @@ class SimResults:
 
         # Combined dictionary
         result_dict = matchr.return_match_info(
-            cols=self.cols_to_save_exit
+            cols=self.cols_to_save_txp
         )
 
         result_dict[cn.TIME_WAITED] = round_to_decimals(
@@ -120,6 +131,29 @@ class SimResults:
             1 if matchr.__dict__.get(cn.EXT_ALLOC_PRIORITY) is not None
             else 0
         )
+
+        if self.broad_loci_to_save and pat.hla_system:
+            result_dict.update(
+                {
+                    'mmb_' + k: v
+                    for k, v in pat.hla_system._determine_broad_mismatches(
+                        d = matchr.donor,
+                        p = pat,
+                        loci = set(self.broad_loci_to_save)
+                    ).items()
+                }
+            )
+        if self.split_loci_to_save and pat.hla_system:
+            result_dict.update(
+                {
+                    'mms_' + k: v
+                    for k, v in pat.hla_system._determine_split_mismatches(
+                        d = matchr.donor,
+                        p = pat,
+                        loci = set(self.split_loci_to_save)
+                    ).items()
+                }
+            )
 
         if result_dict[cn.ALLOCATION_PROGRAM] == mgr.ESP:
             result_dict[cn.ALLOCATION_MECHANISM] = mgr.ESP
@@ -166,6 +200,8 @@ class SimResults:
                 date_relist if date_relist and date_relist < cens_date
                 else None
             ),
+            cn.PATIENT_FAILURE_DATE_RAW: date_failure,
+            cn.PATIENT_RELISTING_DATE_RAW: date_relist,
             cn.PATIENT_RELISTING: (
                 1 if date_relist and date_relist < cens_date
                 else 0 if date_relist
@@ -296,10 +332,22 @@ class SimResults:
         data_ = data_.loc[:, list(es.MATCH_INFO_COLS)]
         id_cols = [c for c in data_.columns if c.startswith('id')]
         data_.loc[:, id_cols] = data_.loc[:, id_cols].astype('Int64')
-        data_.dropna(how='all', axis='columns', inplace=True)
-        data_.loc[:, cn.ACCEPTED] = data_.loc[:, cn.ACCEPTANCE_REASON].isin(
-            (cn.T1, cn.T3)
+        data_ = data_.dropna(
+            subset=data_.columns.difference(['cn.ACCEPTANCE_REASON']),
+            how='all'
         )
+        try:
+            data_.loc[:, cn.ACCEPTED] = data_.loc[:, cn.ACCEPTANCE_REASON].isin(
+                es.ACCEPTANCE_CODES
+            )
+        except:
+            print('No acceptance reason column in the following dataset:')
+            print(data_)
+            data_.loc[:, cn.ACCEPTANCE_REASON] = cn.T3
+            data_.loc[:, cn.ACCEPTED] = data_.loc[:, cn.ACCEPTANCE_REASON].isin(
+                es.ACCEPTANCE_CODES
+            )
+
         return data_
 
     def return_transplantations(
@@ -311,11 +359,11 @@ class SimResults:
         """Return transplantation information as DataFrame."""
         data_ = pd.DataFrame.from_records(
             self.transplantations,
-            columns=self.cols_to_save_exit + es.OUTPUT_COLS_EXIT_CONSTRUCTED
+            columns=self.cols_to_save_txp + es.OUTPUT_COLS_EXIT_CONSTRUCTED
         )
         cols = [
             col for col in data_.columns
-            if col in self.cols_to_save_exit + es.OUTPUT_COLS_EXIT_CONSTRUCTED
+            if col in self.cols_to_save_txp + es.OUTPUT_COLS_EXIT_CONSTRUCTED
         ]
         data_ = data_.loc[:, cols]
         data_.dropna(how='all', axis='columns', inplace=True)

@@ -3,7 +3,6 @@
 """
 Created on Fri 11-02-2022
 
-Script to develop the standard exception system.
 
 @author: H.C. de Ferrante
 """
@@ -44,46 +43,6 @@ if __name__ == '__main__':
     hla_system = HLASystem(ss)
     DUMMY_DATE = pd.Timestamp('2000-01-01')
 
-    print('Loading data')
-    df_don = rdr.read_donor_pool('data/donor_pool.csv')
-
-    df_don_hlas = df_don.loc[:, [cn.ID_DONOR, cn.DONOR_HLA]].drop_duplicates()
-
-    antigen_sets = [set(s.split(' ')) for s in df_don_hlas.donor_hla]
-
-    donors = [
-        Donor(
-            id_donor=1255,
-            donor_country='Belgium',
-            donor_region='BLGTP',
-            donor_center='BLGTP',
-            bloodgroup='O',
-            reporting_date=DUMMY_DATE,
-            weight=50,
-            donor_dcd=False,
-            hla=s,
-            hla_system=hla_system,
-            hypertension=False,
-            diabetes=False,
-            cardiac_arrest=False,
-            last_creat=1.5,
-            smoker=False,
-            age=45,
-            hbsag=False,
-            hcvab=False,
-            hbcab=False,
-            sepsis=False,
-            meningitis=False,
-            malignancy=False,
-            drug_abuse=False,
-            euthanasia=False,
-            rescue=False,
-            death_cause_group='Anoxia',
-            n_kidneys_available=2
-        )
-        for s in df_don_hlas.donor_hla
-    ]
-
     df_stat = pd.read_csv(
             'raw_data/status_updates.csv'
         )
@@ -92,12 +51,11 @@ if __name__ == '__main__':
     )
 
     # Read patients
-    df_pats = le._read_patients_rich(ss, nrows=10)
+    df_pats = le._read_patients_rich(ss)
     df_pats = df_pats.dropna(subset=[cn.PATIENT_HLA])
     df_pats = df_pats.dropna(subset = cn.PATIENT_HLA)
     df_pats = df_pats.loc[df_pats.loc[:, cn.PATIENT_HLA] != '', :]
     df_pats = df_pats.loc[df_pats.recipient_country.isin(es.ET_COUNTRIES), :]
-
 
     all_hlas = (
         df_pats.loc[:, cn.PATIENT_HLA].drop_duplicates().to_list() +
@@ -112,8 +70,8 @@ if __name__ == '__main__':
                 timedelta(days=365.25 * 50)
             ),
             recipient_country='Germany',
-            recipient_region='Germany',
-            recipient_center='Germany',
+            recipient_region='GND',
+            recipient_center='GHMTP',
             bloodgroup='O',
             hla=hla,
             listing_date=DUMMY_DATE,
@@ -124,21 +82,29 @@ if __name__ == '__main__':
         for hla in all_hlas
     ]
 
-    print('Determining mismatches')
-    hla_mismatch_probabilities = list()
-    for i, pat in enumerate(patients):
-        if i>0 and i % 1000 == 0:
-            print(f'Processed {round(i/len(patients)*100)}% of all HLAs')
-        mm_dicts = (hla_system.determine_mismatches(d=d, p=pat) for d in donors)
-        prob_atmost1mm = sum(
-            (mm_dict['mmb_hla_a'] + mm_dict['mmb_hla_b'] + mm_dict['mms_hla_dr']) <= 1 for mm_dict in mm_dicts if mm_dict
-            ) / len(donors)
-        hla_mismatchfreq = (100*((1-prob_atmost1mm)**1000))
-        hla_mismatch_probabilities.append(
-            {'r_hla': pat.hla, 'prob_atmost1mm': prob_atmost1mm, 'hla_mismatchfreq': round(hla_mismatchfreq, 5)}
-        )
+    results_hla_mp = (
+        {
+            **{'r_hla': pat.hla},
+            **hla_system.calculate_hla_match_potential(
+                pat,
+                hla_match_pot_definitions=es.HLA_MATCH_POTENTIALS
+            )
+        } for pat in patients
+    )
 
-    d_mmp = pd.DataFrame.from_records(hla_mismatch_probabilities)
+    # Construct measures for MMP.
+    d_mmp = pd.DataFrame.from_records(results_hla_mp)
     d_mmp = d_mmp.drop_duplicates()
-    d_mmp.to_csv('raw_data/calculated_mismatchfreqs.csv', index=False)
+    for col in d_mmp.columns:
+        if 'hmp_' in col:
+            newcolname = col.replace('hmp_', 'hlamismatchfreq_')
+            d_mmp.loc[:, newcolname] = d_mmp.loc[:, col].transform(
+                lambda x: round(100*(1-x)**1000, 5)
+            )
+
+
+    d_mmp.columns = d_mmp.columns.str.lower()
+
+    d_mmp.to_csv('data/favorably_matched_haplotype_frequencies2016.csv', index=False)
+
 

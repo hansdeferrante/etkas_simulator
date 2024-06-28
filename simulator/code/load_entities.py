@@ -375,7 +375,6 @@ def preload_status_updates(
             ascending=(True, True, False)
         )
     )
-
     d_status_updates = d_status_updates.loc[
         d_status_updates[cn.ID_REGISTRATION].isin(
             patients.keys()
@@ -445,6 +444,7 @@ def dstat_to_queue(
                     type_status=rcrd[cn.TYPE_UPDATE],
                     arrival_time=rcrd[cn.TSTART],
                     status_detail=rcrd[cn.STATUS_DETAIL],
+                    status_detail2=rcrd[cn.STATUS_DETAIL2],
                     status_value=rcrd[cn.STATUS_VALUE],
                     sim_start_time=rcrd[cn.SIM_START_TIME]
                 ) for rcrd in rcrds

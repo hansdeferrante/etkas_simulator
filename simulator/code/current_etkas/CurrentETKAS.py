@@ -49,8 +49,16 @@ class PatientMatchRecord:
         else:
             self.__dict__[cn.YEARS_ON_DIAL] = 0
 
-        # ET MMP
-        self.__dict__[cn.ET_MMP] = patient.get_et_mmp()
+        # Mismatch frequency (counted)
+        if cn.HLA_MISMATCHFREQ in calc_points.variables:
+            self.__dict__.update(patient.get_hla_mismatchfreqs())
+
+        # Mismatch probability
+        if cn.ET_MMP in calc_points.variables:
+            self.__dict__[cn.ET_MMP] = patient.get_et_mmp()
+
+        # Copy over vPRA
+        self.__dict__[cn.VPRA] = patient.vpra
 
         # Add previously accrued wait-time for re-transplant candidates
         self.__dict__[cn.PREVIOUS_WT] = patient.__dict__[cn.PREVIOUS_WT]
@@ -142,9 +150,30 @@ class MatchRecordCurrentETKAS(MatchRecord):
 
         self._determine_match_tier()
 
-        # Calculate mismatch points (approximately, based on loaded frequencies)
-        self.__dict__[cn.ET_MMP] = self.patient.get_et_mmp()
+        # Mismatch frequency (counted)
+        if calc_points.variables & es.HAPLOTYPE_FREQUENCY_VARIABLES:
+            self.__dict__.update(patient.get_hla_mismatchfreqs())
+
+        # Mismatch probability
+        if cn.ET_MMP in calc_points.variables:
+            self.__dict__[cn.ET_MMP] = patient.get_et_mmp()
+        self.__dict__[cn.VPRA] = patient.vpra
+
+        # Add balance points
         self.add_balance_points(bal_system=bal_system)
+
+        # Determine additional needed features, if applicable.
+        if not calc_points._vars_to_construct_initialized:
+            calc_points.set_vars_to_construct(
+                self.__dict__
+            )
+        self._mq = None
+        if calc_points.vars_to_construct:
+            for var in calc_points.vars_to_construct:
+                try:
+                    self.__dict__[var] = es.VARIABLE_CONSTRUCTION_FUNCTIONS[var](self)
+                except:
+                    raise Exception(f'Could not construct {var} for {self.__class__.__name__}')
 
         # Calculate match points (as well as components if necessary)
         if self.store_score_components:
@@ -163,7 +192,6 @@ class MatchRecordCurrentETKAS(MatchRecord):
 
         # Set match tuple
         self._match_tuple = None
-        self._mq = None
         self._compatible = None
 
     def _determine_match_tier(self) -> None:

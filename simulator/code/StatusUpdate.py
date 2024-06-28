@@ -36,7 +36,7 @@ class StatusUpdate:
     """
     __slots__ = [
         'type_status', 'synthetic', 'status_detail',
-        'status_value', 'arrival_time',
+        'status_detail2', 'status_value', 'arrival_time',
         'offset_arrival_to_simstart', 'before_sim_start'
         ]
 
@@ -45,7 +45,8 @@ class StatusUpdate:
             arrival_time: float,
             sim_start_time: float,
             status_value: str = '',
-            status_detail: str = ''
+            status_detail: str = '',
+            status_detail2: str = ''
             ) -> None:
 
         self.type_status, self.synthetic = (type_status, False) \
@@ -57,6 +58,7 @@ class StatusUpdate:
 
         self.status_value = status_value
         self.status_detail = status_detail
+        self.status_detail2 = status_detail2
 
         self.arrival_time = arrival_time
 

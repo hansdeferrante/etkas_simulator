@@ -66,6 +66,16 @@ MMS_HLA_A = 'mms_hla_a'
 MMS_HLA_B = 'mms_hla_b'
 MMS_HLA_DR = 'mms_hla_dr'
 
+NHS_MISMATCH_LEVEL = 'nhs_mm_level'
+ET_MISMATCH_LEVEL = 'et_mm_level'
+
+FH = 'fh'
+DR_plus = 'dr+'
+DR0 = 'dr0',
+DR1 = 'dr1',
+DR2 = 'dr2'
+
+
 PED = 'PED'
 PRF = 'PRF'
 DIAG = 'DIAG'

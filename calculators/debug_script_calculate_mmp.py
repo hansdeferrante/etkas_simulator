@@ -3,7 +3,6 @@
 """
 Created on Fri 11-02-2022
 
-Script to develop the standard exception system.
 
 @author: H.C. de Ferrante
 """
@@ -18,9 +17,6 @@ if True:  # noqa E402
     import simulator.code.read_input_files as rdr
     import simulator.code.load_entities as le
     import simulator.magic_values.etkass_settings as es
-    from simulator.code.current_etkas.CurrentETKAS import (
-        MatchListCurrentETKAS
-    )
     from simulator.code.entities import HLASystem
     import pandas as pd
     import os
@@ -134,6 +130,7 @@ if __name__ == '__main__':
 
     d_mmp = pd.DataFrame.from_records(hla_mismatch_probabilities)
     d_mmp = d_mmp.drop_duplicates()
-    print(d_mmp)
-    # d_mmp.to_csv('raw_data/calculated_mismatchfreqs.csv', index=False)
+
+    # Write to file
+    d_mmp.to_csv('raw_data/calculated_mismatchfreqs.csv', index=False)
 

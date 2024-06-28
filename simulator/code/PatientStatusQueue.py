@@ -9,7 +9,8 @@ Created on 16-08-2022
 import heapq
 from simulator.code.StatusUpdate import StatusUpdate, ProfileUpdate
 import simulator.magic_values.magic_values_rules as mgr
-from typing import List, Union, Tuple
+from typing import List, Union, Tuple, Optional
+import pandas as pd
 
 
 class PatientStatusQueue:
