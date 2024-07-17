@@ -89,12 +89,12 @@ def init(il, gl):
 if __name__ == '__main__':
 
     n_workers = cpu_count()
-    n_workers = 6
+    n_workers = 10
 
     paths = list_full_paths(
         [
             os.path.join(es.DIR_SIM_SETTINGS, path)
-            for path in ['2024-06-27']
+            for path in ['2024-06-29']
             ]
     )
     shuffle(paths)

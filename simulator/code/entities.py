@@ -2089,6 +2089,30 @@ class HLASystem:
             return 0
 
 
+    def return_mm_dicts(self, p: Patient) -> List[Optional[Dict[str, int]]]:
+
+        return list(
+            self.determine_mismatches(d=d, p=p)
+            for d in self.structured_donor_pool_hlas
+        )
+
+
+    def count_match_qualities(
+            self, p: Patient,
+    ) -> Dict[str, int]:
+        list_of_mqs = self.return_mm_dicts(
+            p = p
+        )
+        list_of_mq_strings = [
+            str(mqd['mmb_hla_a']) + str(mqd['mmb_hla_b']) + str(mqd['mms_hla_dr'])
+            if mqd is not None
+            else ''
+            for mqd in list_of_mqs
+        ]
+        return(Counter(list_of_mq_strings))
+
+
+
     def calculate_hla_match_potential(
             self, p: Patient,
             hla_match_pot_definitions: Dict[str, Callable]
@@ -2096,9 +2120,8 @@ class HLASystem:
         """Calculate HLA-match potentials, i.e. only based on MM-dict.
         """
 
-        mm_dicts = list(
-            self.determine_mismatches(d=d, p=p)
-            for d in self.structured_donor_pool_hlas
+        mm_dicts = self.return_mm_dicts(
+            p = p
         )
 
         hmps = {

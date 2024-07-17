@@ -58,8 +58,11 @@ EXTALLOC_INTERNATIONAL_PRIORITY = {
 
 AGE_ESP_ELIGIBLE = 65
 
+def reorder_product(*a):
+    for tup in product(*a[::-1]):
+        yield tup[::-1]
 HLA_MQS = list(
-    product(
+    reorder_product(
         range(3),
         range(3),
         range(3)
@@ -73,6 +76,8 @@ MISMATCH_STR_DEFINITION = (
 HLA_MQS_STR = list(
     ''.join((str(i) for i in item)) for item in HLA_MQS
 )
+
+
 PROFILE_HLA_MQS = {
     hla: f'profile_hla{mq_str}' for hla, mq_str in zip(HLA_MQS, HLA_MQS_STR)
 }
