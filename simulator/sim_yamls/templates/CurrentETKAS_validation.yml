@@ -1,0 +1,78 @@
+SEED: {{sim_seed}}
+SIM_START_DATE: {{sim_start_date}}
+SIM_END_DATE: 2019-04-01
+PATH_STATUS_UPDATES: data/patient_statuses/patstat{{kth_stat}}.csv
+KTH_STATUS_FILE: {{kth_stat}}
+LOAD_RETXS_FROM: {{load_retxs_from}}
+LOAD_RETXS_TO: {{load_retxs_to}}
+SAVE_MATCH_LISTS: {{save_match_lists}}
+PATH_MATCH_LISTS: match_lists_k{{kth_stat}}_s{{sim_seed}}.csv
+RESULTS_FOLDER: simulator/results/{{date}}/{{sim_name}}/
+PATH_DISCARDS: discards_k{{kth_stat}}_s{{sim_seed}}.csv
+PATH_FINAL_PATIENT_STATUS: patients_k{{kth_stat}}_s{{sim_seed}}.csv
+PATH_TRANSPLANTATIONS: transplantations_k{{kth_stat}}_s{{sim_seed}}.csv
+PATH_EXITS: exits_k{{kth_stat}}_s{{sim_seed}}.csv
+LOAD_RETXS_FROM: 2004-01-01
+LOAD_RETXS_TO: 2020-01-01
+POINTS_ETKAS:
+  YEARS_ON_DIAL: 33.333333
+  PREVIOUS_WT_YEARS: 33.333333
+  INTERCEPT: 400
+  MMB_HLA_A: -66.66666
+  MMB_HLA_B: -66.66666
+  MMS_HLA_DR: -66.66667
+  INTERCEPT:R_PEDIATRIC: 400
+  MMB_HLA_A:R_PEDIATRIC: -66.66666
+  MMB_HLA_B:R_PEDIATRIC: -66.66666
+  MMS_HLA_DR:R_PEDIATRIC: -66.66667
+  ET_MMP: 1
+  BAL_NAT: 10
+  BAL_REG: 1
+  MATCH_L: 300
+  MATCH_N: 100
+  R_PEDIATRIC: 100
+  PATIENT_IS_HU: 500
+POINTS_ESP:
+  YEARS_ON_DIAL: 33.333333
+  PREVIOUS_WT_YEARS: 33.333333
+  INTERCEPT: 0
+LOCI_ZERO_MISMATCH:
+  !!python/tuple [mmb_hla_a, mmb_hla_b, mms_hla_dr]
+LOCI_MMP_SPLIT:
+  !!python/tuple [hla_dr]
+LOCI_MMP_BROAD:
+  !!python/tuple [hla_a, hla_b]
+MATCHES_AT_TRANSPLANT_BROAD:
+  !!python/tuple [hla_dqb]
+MATCHES_AT_TRANSPLANT_SPLIT:
+  !!python/tuple [hla_dqb]
+MATCHES_AT_TRANSPLANT_BROAD:
+  !!python/tuple [hla_dqb]
+MATCHES_AT_TRANSPLANT_SPLIT:
+  !!python/tuple [hla_dqb]
+BALANCE_GROUP_VARS: null
+  #!!python/tuple [d_bloodgroup]
+WINDOW_FOR_BALANCE: 365
+STARTTIME_FOR_BALANCE: 2019-04-01
+PATH_ALLELE_FREQUENCIES_BROAD: simulator/magic_values/allele_frequencies_broad.yaml
+PATH_ALLELE_FREQUENCIES_SPLIT: simulator/magic_values/allele_frequencies_split.yaml
+PATH_BG_FREQUENCIES: simulator/magic_values/bg_frequencies.yaml
+PATH_MATCH_TABLE: data/et_match_table_all.csv
+PATH_OFFERS: raw_data/all_etkas_match_lists_with_mq_vpra.csv
+PATH_DONORS: data/donors.csv
+PATH_DONOR_POOL: data/donor_pool.csv
+PATH_MATCH_POTENTIALS: data/favorably_matched_haplotype_frequencies2004.csv
+PATH_BALANCES: data/donors_for_balances.csv
+PATH_PROFILES: data/profiles.csv
+PATH_PATIENTS: data/patients.csv
+CENTER_ACC_POLICY: 'LR'
+PATIENT_ACC_POLICY: 'LR'
+SIMULATE_RANDOM_EFFECTS: true
+USE_REAL_FU: false
+USE_REAL_PED: true
+SIM_RETX: true
+SIMULATE_RESCUE: true
+AGE_ESP: 65
+SEPARATE_PED_ACCEPTANCE: false
+ALLOW_DISCARDS: false
+STORE_SCORE_COMPONENTS: {{store_components}}
